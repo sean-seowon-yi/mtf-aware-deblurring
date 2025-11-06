@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=62", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mtf-aware-deblurring"
+version = "0.1.0"
+description = "Physics-aware coded-exposure motion deblurring tools"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Pedram Yazdinia" },
+  { name = "Seo Won Yi" }
+]
+dependencies = [
+  "numpy>=1.23",
+  "matplotlib>=3.5",
+  "imageio>=2.31",
+  "pillow>=9.0",
+  "ipython>=8.0"
+]
+
+[project.urls]
+Repository = "https://github.com/pyazd/mtf-aware-deblurring"
+Proposal = "docs/project_proposal.pdf"
