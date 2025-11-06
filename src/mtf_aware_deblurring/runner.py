@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 
+from .datasets import DIV2KDataset
 from .metrics import spectral_snr
 from .noise import add_poisson_gaussian
 from .optics import fft_convolve2d, kernel2d_from_psf1d, motion_psf_from_code, mtf_from_kernel
@@ -418,22 +420,225 @@ def run_forward_model(
     return runner.run()
 
 
-def main() -> None:
-    checkerboard_scene = SyntheticData("Checker Board").create_img(DEFAULT_SEED)
+def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run the MTF-aware forward model on synthetic scenes or DIV2K frames."
+    )
+    parser.add_argument(
+        "--div2k-root",
+        type=Path,
+        help="Path to the DIV2K dataset root (expects DIV2K_*_LR_<method>/ directories).",
+    )
+    parser.add_argument(
+        "--subset",
+        default="train",
+        choices=["train", "valid"],
+        help="DIV2K subset to use when --div2k-root is provided.",
+    )
+    parser.add_argument(
+        "--degradation",
+        default="bicubic",
+        help="DIV2K degradation label (e.g., bicubic, unknown).",
+    )
+    parser.add_argument(
+        "--scale",
+        default="X2",
+        help="DIV2K scale folder (X2, X3, X4, ...).",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="Maximum number of DIV2K frames to process.",
+    )
+    parser.add_argument(
+        "--target-size",
+        type=int,
+        default=256,
+        help="Optional square resize applied to DIV2K frames before simulation.",
+    )
+    parser.add_argument(
+        "--patterns",
+        nargs="+",
+        default=["box", "random", "legendre"],
+        help="Exposure patterns to evaluate.",
+    )
+    parser.add_argument(
+        "--selected-pattern",
+        help="If provided, only this pattern will be simulated.",
+    )
+    parser.add_argument(
+        "--taps",
+        type=int,
+        default=31,
+        help="Number of shutter taps (T) for exposure patterns.",
+    )
+    parser.add_argument(
+        "--blur-length",
+        type=float,
+        default=15.0,
+        help="Total motion blur length in pixels.",
+    )
+    parser.add_argument(
+        "--duty-cycle",
+        type=float,
+        default=0.5,
+        help="Duty cycle used for random codes.",
+    )
+    parser.add_argument(
+        "--photon-budget",
+        type=float,
+        default=1000.0,
+        help="Photon budget for Poisson noise simulation.",
+    )
+    parser.add_argument(
+        "--read-noise",
+        type=float,
+        default=0.01,
+        help="Read-noise standard deviation in [0,1] range.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=DEFAULT_SEED,
+        help="Base random seed for pattern generation.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Base directory for outputs when saving arrays/figures.",
+    )
+    parser.add_argument(
+        "--save-figures",
+        action="store_true",
+        help="Persist Matplotlib figures to disk.",
+    )
+    parser.add_argument(
+        "--save-pngs",
+        action="store_true",
+        help="Persist PNG renderings of noisy observations.",
+    )
+    parser.add_argument(
+        "--save-arrays",
+        action="store_true",
+        help="Persist NumPy arrays (scene, PSF, MTF, etc.).",
+    )
+    parser.add_argument(
+        "--show-plots",
+        action="store_true",
+        help="Display figures interactively (may be slow for many images).",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print detailed information about each pattern.",
+    )
+    parser.add_argument(
+        "--include-synthetic",
+        action="store_true",
+        help="Also run the synthetic checkerboard/rings demo when using DIV2K.",
+    )
+    return parser.parse_args(argv)
+
+
+def _maybe_resolve_output_dir(base: Optional[Path]) -> Optional[Path]:
+    if base is None:
+        return None
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def _run_synthetic_demo(args: argparse.Namespace) -> None:
+    checkerboard_scene = SyntheticData("Checker Board").create_img(args.seed)
     run_forward_model(
         checkerboard_scene,
-        patterns=["box", "random", "legendre"],
-        show_plots=True,
-        verbose=False,
+        patterns=args.patterns,
+        selected_pattern=args.selected_pattern,
+        T=args.taps,
+        blur_length_px=args.blur_length,
+        duty_cycle=args.duty_cycle,
+        random_seed=args.seed,
+        photon_budget=args.photon_budget,
+        read_noise_sigma=args.read_noise,
+        show_plots=args.show_plots,
+        save_arrays=args.save_arrays,
+        save_pngs=args.save_pngs,
+        save_figures=args.save_figures,
+        output_dir=_maybe_resolve_output_dir(args.output_dir),
+        verbose=args.verbose,
     )
 
-    ring_scene = SyntheticData("Rings").create_img(DEFAULT_SEED)
+    ring_scene = SyntheticData("Rings").create_img(args.seed)
     run_forward_model(
         ring_scene,
-        patterns=["box", "random", "legendre"],
-        show_plots=True,
-        verbose=False,
+        patterns=args.patterns,
+        selected_pattern=args.selected_pattern,
+        T=args.taps,
+        blur_length_px=args.blur_length,
+        duty_cycle=args.duty_cycle,
+        random_seed=args.seed,
+        photon_budget=args.photon_budget,
+        read_noise_sigma=args.read_noise,
+        show_plots=args.show_plots,
+        save_arrays=args.save_arrays,
+        save_pngs=args.save_pngs,
+        save_figures=args.save_figures,
+        output_dir=_maybe_resolve_output_dir(args.output_dir),
+        verbose=args.verbose,
     )
+
+
+def _run_div2k_batch(args: argparse.Namespace) -> None:
+    assert args.div2k_root is not None
+    dataset = DIV2KDataset(
+        root=args.div2k_root,
+        subset=args.subset,
+        degradation=args.degradation,
+        scale=args.scale,
+        limit=args.limit,
+        target_size=args.target_size,
+    )
+
+    if args.output_dir is not None:
+        base_output = args.output_dir
+    else:
+        base_output = default_output_dir() / "div2k"
+
+    base_output.mkdir(parents=True, exist_ok=True)
+
+    for idx, (path, image) in enumerate(dataset):
+        relative_dir = base_output / path.stem
+        relative_dir.mkdir(parents=True, exist_ok=True)
+        run_forward_model(
+            image,
+            patterns=args.patterns,
+            selected_pattern=args.selected_pattern,
+            T=args.taps,
+            blur_length_px=args.blur_length,
+            duty_cycle=args.duty_cycle,
+            random_seed=args.seed + idx,
+            photon_budget=args.photon_budget,
+            read_noise_sigma=args.read_noise,
+            show_plots=args.show_plots,
+            save_arrays=args.save_arrays,
+            save_pngs=args.save_pngs,
+            save_figures=args.save_figures,
+            output_dir=relative_dir,
+            verbose=args.verbose,
+        )
+
+
+def main(argv: Optional[Sequence[str]] = None) -> None:
+    args = parse_args(argv)
+
+    if args.div2k_root is None:
+        _run_synthetic_demo(args)
+        return
+
+    if args.include_synthetic:
+        _run_synthetic_demo(args)
+
+    _run_div2k_batch(args)
 
 
 if __name__ == "__main__":

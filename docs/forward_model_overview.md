@@ -5,6 +5,7 @@ the compatibility shim `mtf_aware_deblurring.forward_pipeline`).
 
 ## Key Components
 - `SyntheticData`: Generates synthetic test scenes (checkerboard, rings) with optional random seeds.
+- `DIV2KDataset` (`datasets.py`): Streams low-resolution DIV2K frames for real-image simulations.
 - `make_exposure_code` (`patterns.py`): Builds box, random, and Modified Legendre Sequence (MLS) flutter codes.
 - `motion_psf_from_code` (`optics.py`): Converts exposure codes into motion PSFs and 2D kernels.
 - `ForwardModelRunner`: High-level orchestration that produces blurred/noisy images, PSF/OTF/MTF diagnostics, and spectral SNR plots.

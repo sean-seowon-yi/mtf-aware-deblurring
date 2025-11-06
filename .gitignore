@@ -16,3 +16,4 @@ pytest_cache/
 .DS_Store
 Thumbs.db
 forward_model_outputs/
+data/

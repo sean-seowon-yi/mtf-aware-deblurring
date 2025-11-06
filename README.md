@@ -26,10 +26,19 @@ Physics-aware motion deblurring toolkit that simulates coded-exposure capture, e
    ```
    Generated figures and arrays are written to `forward_model_outputs/` when the saving flags are enabled.
 
+4. Run the forward model on DIV2K low-resolution frames (download DIV2K separately and point to its root):
+   ```bash
+   python -m mtf_aware_deblurring.forward_pipeline \
+     --div2k-root path/to/DIV2K \
+     --limit 10 \
+     --save-arrays --save-figures --save-pngs
+   ```
+   Outputs land in `forward_model_outputs/div2k/<image_id>/`.
+
 ## Repository Layout
 - `src/mtf_aware_deblurring/runner.py` - core forward-imaging runner and CLI demo harness
 - `src/mtf_aware_deblurring/forward_pipeline.py` - compatibility shim that re-exports the public API for `python -m ...`
-- `src/mtf_aware_deblurring/{patterns,optics,noise,metrics,synthetic,utils}.py` - modular helpers for exposure codes, PSFs/MTFs, noise models, and synthetic scenes
+- `src/mtf_aware_deblurring/{datasets,patterns,optics,noise,metrics,synthetic,utils}.py` - modular helpers for data loading, exposure codes, PSFs/MTFs, noise models, and synthetic scenes
 - `docs/project_proposal.pdf` - original course proposal detailing motivation, prior work, milestones, and evaluation plan
 - `docs/proposal_summary.md` - text summary extracted from the proposal for quick reference
 - `pyproject.toml` / `requirements.txt` - packaging metadata and runtime dependencies

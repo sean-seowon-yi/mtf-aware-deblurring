@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .datasets import DIV2KDataset
 from .metrics import spectral_snr
 from .noise import add_poisson_gaussian
 from .optics import fft_convolve2d, kernel2d_from_psf1d, motion_psf_from_code, mtf_from_kernel, otf2d, pad_to_shape
@@ -51,6 +52,7 @@ __all__ = [
     "mtf_from_kernel",
     "add_poisson_gaussian",
     "spectral_snr",
+    "DIV2KDataset",
 ]
 
 
