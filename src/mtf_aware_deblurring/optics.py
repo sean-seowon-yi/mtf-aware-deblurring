@@ -40,13 +40,22 @@ def kernel2d_from_psf1d(psf1d: np.ndarray) -> np.ndarray:
     return psf1d.reshape(1, -1)
 
 
-def fft_convolve2d(img: np.ndarray, kernel: np.ndarray) -> np.ndarray:
+def _fft_convolve2d_single(img: np.ndarray, kernel: np.ndarray) -> np.ndarray:
     H, W = img.shape
     K = pad_to_shape(kernel, (H, W))
     IMG = fft2(img)
     KER = fft2(ifftshift(K))
     Y = IMG * KER
     return np.real(ifft2(Y))
+
+
+def fft_convolve2d(img: np.ndarray, kernel: np.ndarray) -> np.ndarray:
+    if img.ndim == 2:
+        return _fft_convolve2d_single(img, kernel)
+    if img.ndim == 3:
+        channels = [_fft_convolve2d_single(img[..., c], kernel) for c in range(img.shape[2])]
+        return np.stack(channels, axis=-1)
+    raise ValueError("Input image must be 2D or 3D.")
 
 
 def otf2d(kernel: np.ndarray, shape: Tuple[int, int]) -> np.ndarray:

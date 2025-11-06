@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import zipfile
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
+from urllib.error import URLError, HTTPError
+from urllib.request import urlopen
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,6 +19,7 @@ from .synthetic import SyntheticData
 from .utils import axes_as_list, configure_matplotlib_defaults, default_output_dir, finalize_figure
 
 DEFAULT_SEED = 0
+DIV2K_BASE_URL = "https://data.vision.ee.ethz.ch/cvl/DIV2K"
 
 
 class ForwardModelRunner:
@@ -188,7 +192,8 @@ class ForwardModelRunner:
             read_noise_sigma=self.read_noise_sigma,
             rng_seed=self.random_seed + idx,
         )
-        mtf = mtf_from_kernel(kernel, self.scene.shape)
+        image_shape = self.scene.shape[:2]
+        mtf = mtf_from_kernel(kernel, image_shape)
         ssnr = spectral_snr(blurred, noisy)
 
         metadata: Dict[str, Any] = {"pattern": pattern}
@@ -245,9 +250,7 @@ class ForwardModelRunner:
 
     def _plot_scene(self) -> None:
         fig, ax = plt.subplots()
-        ax.imshow(self.scene, cmap="gray")
-        ax.set_title("Synthetic Scene")
-        ax.axis("off")
+        self._display_image(ax, self.scene, "Input Scene")
         if self.save_figures and self.figures_dir is not None:
             finalize_figure(fig, self.figures_dir / "scene.png", self.show_plots)
         else:
@@ -272,14 +275,10 @@ class ForwardModelRunner:
     def _plot_blurred_images(self) -> None:
         fig, axs = plt.subplots(1, len(self.patterns) + 1, figsize=(4 * (len(self.patterns) + 1), 3))
         axes = axes_as_list(axs)
-        axes[0].imshow(self.scene, cmap="gray")
-        axes[0].set_title("Original")
-        axes[0].axis("off")
+        self._display_image(axes[0], self.scene, "Original")
         for ax, pattern in zip(axes[1:], self.patterns):
             data = self.results[pattern]
-            ax.imshow(data["blurred"], cmap="gray")
-            ax.set_title(data["label"])
-            ax.axis("off")
+            self._display_image(ax, data["blurred"], data["label"])
         if self.save_figures and self.figures_dir is not None:
             finalize_figure(fig, self.figures_dir / "blurred.png", self.show_plots)
         else:
@@ -324,14 +323,10 @@ class ForwardModelRunner:
     def _plot_noisy_images(self) -> None:
         fig, axs = plt.subplots(1, len(self.patterns) + 1, figsize=(4 * (len(self.patterns) + 1), 3))
         axes = axes_as_list(axs)
-        axes[0].imshow(self.scene, cmap="gray")
-        axes[0].set_title("Original")
-        axes[0].axis("off")
+        self._display_image(axes[0], self.scene, "Original")
         for ax, pattern in zip(axes[1:], self.patterns):
             data = self.results[pattern]
-            ax.imshow(data["noisy"], cmap="gray")
-            ax.set_title(f"{data['label']} + noise")
-            ax.axis("off")
+            self._display_image(ax, data["noisy"], f"{data['label']} + noise")
         if self.save_figures and self.figures_dir is not None:
             finalize_figure(fig, self.figures_dir / "noisy.png", self.show_plots)
         else:
@@ -345,7 +340,10 @@ class ForwardModelRunner:
         axes = axes_as_list(axs)
         for ax, pattern in zip(axes, self.patterns):
             data = self.results[pattern]
-            ax.imshow(data["ssnr"], cmap="gray")
+            ssnr_img = data["ssnr"]
+            if ssnr_img.ndim == 3:
+                ssnr_img = np.mean(ssnr_img, axis=-1)
+            ax.imshow(ssnr_img, cmap="gray")
             ax.set_title(f"Spectral SNR ({data['label']})")
             ax.axis("off")
         if self.save_figures and self.figures_dir is not None:
@@ -373,6 +371,14 @@ class ForwardModelRunner:
                 f"  Prime: {prime_info}, rotation: {rotation_info}, "
                 f"append_mode: {mode_info}, flip: {flip_info}"
             )
+
+    def _display_image(self, ax, image: np.ndarray, title: str) -> None:
+        if image.ndim == 2:
+            ax.imshow(image, cmap="gray")
+        else:
+            ax.imshow(np.clip(image, 0, 1))
+        ax.set_title(title)
+        ax.axis("off")
 
 
 def run_forward_model(
@@ -458,6 +464,17 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Optional square resize applied to DIV2K frames before simulation.",
     )
     parser.add_argument(
+        "--image-mode",
+        choices=["grayscale", "rgb"],
+        default="grayscale",
+        help="Color mode for loaded DIV2K frames.",
+    )
+    parser.add_argument(
+        "--auto-download",
+        action="store_true",
+        help="Automatically download the requested DIV2K subset if it is missing.",
+    )
+    parser.add_argument(
         "--patterns",
         nargs="+",
         default=["box", "random", "legendre"],
@@ -541,6 +558,59 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _expected_div2k_dir(args: argparse.Namespace) -> Path:
+    return Path(args.div2k_root) / f"DIV2K_{args.subset}_LR_{args.degradation}" / args.scale.upper()
+
+
+def _download_div2k_subset(args: argparse.Namespace, target_dir: Path) -> None:
+    root = Path(args.div2k_root)
+    root.mkdir(parents=True, exist_ok=True)
+    zip_name = f"DIV2K_{args.subset}_LR_{args.degradation}_{args.scale.upper()}.zip"
+    url = f"{DIV2K_BASE_URL}/{zip_name}"
+    zip_path = root / zip_name
+
+    if zip_path.exists():
+        print(f"Using existing archive: {zip_path}")
+    else:
+        print(f"Downloading {zip_name} from {url} ...")
+        try:
+            with urlopen(url) as resp, open(zip_path, "wb") as out_file:
+                while True:
+                    chunk = resp.read(1 << 20)
+                    if not chunk:
+                        break
+                    out_file.write(chunk)
+        except (URLError, HTTPError) as exc:  # pragma: no cover - network failure
+            raise RuntimeError(f"Failed to download DIV2K archive from {url}") from exc
+
+    print(f"Extracting {zip_path} ...")
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        archive.extractall(root)
+
+    try:
+        zip_path.unlink()
+    except FileNotFoundError:
+        pass
+
+    if not target_dir.exists():
+        raise FileNotFoundError(
+            f"Expected directory {target_dir} was not created after extracting {zip_name}. "
+            "Check the archive contents or download manually."
+        )
+
+
+def _ensure_div2k_available(args: argparse.Namespace) -> None:
+    target_dir = _expected_div2k_dir(args)
+    if target_dir.exists():
+        return
+    if not args.auto_download:
+        raise FileNotFoundError(
+            f"DIV2K subset not found at {target_dir}. "
+            "Download it manually or rerun with --auto-download."
+        )
+    _download_div2k_subset(args, target_dir)
+
+
 def _maybe_resolve_output_dir(base: Optional[Path]) -> Optional[Path]:
     if base is None:
         return None
@@ -590,6 +660,7 @@ def _run_synthetic_demo(args: argparse.Namespace) -> None:
 
 def _run_div2k_batch(args: argparse.Namespace) -> None:
     assert args.div2k_root is not None
+    _ensure_div2k_available(args)
     dataset = DIV2KDataset(
         root=args.div2k_root,
         subset=args.subset,
@@ -597,6 +668,7 @@ def _run_div2k_batch(args: argparse.Namespace) -> None:
         scale=args.scale,
         limit=args.limit,
         target_size=args.target_size,
+        image_mode=args.image_mode,
     )
 
     if args.output_dir is not None:

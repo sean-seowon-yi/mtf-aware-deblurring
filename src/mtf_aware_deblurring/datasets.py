@@ -41,9 +41,14 @@ class DIV2KDataset:
     limit: Optional[int] = None
     target_size: Optional[int] = 256
     normalize: bool = True
+    image_mode: str = "grayscale"
     extensions: Sequence[str] = (".png", ".jpg", ".jpeg")
 
     def __post_init__(self) -> None:
+        self.image_mode = self.image_mode.lower()
+        if self.image_mode not in ("grayscale", "rgb"):
+            raise ValueError("image_mode must be 'grayscale' or 'rgb'.")
+
         base_dir = (
             Path(self.root)
             / f"DIV2K_{self.subset}_LR_{self.degradation}"
@@ -75,6 +80,7 @@ class DIV2KDataset:
                 path,
                 target_size=self.target_size,
                 normalize=self.normalize,
+                mode=self.image_mode,
             )
             yield path, image
 

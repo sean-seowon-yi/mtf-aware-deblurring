@@ -5,7 +5,7 @@ the compatibility shim `mtf_aware_deblurring.forward_pipeline`).
 
 ## Key Components
 - `SyntheticData`: Generates synthetic test scenes (checkerboard, rings) with optional random seeds.
-- `DIV2KDataset` (`datasets.py`): Streams low-resolution DIV2K frames for real-image simulations.
+- `DIV2KDataset` (`datasets.py`): Streams low-resolution DIV2K frames for real-image simulations (grayscale or RGB).
 - `make_exposure_code` (`patterns.py`): Builds box, random, and Modified Legendre Sequence (MLS) flutter codes.
 - `motion_psf_from_code` (`optics.py`): Converts exposure codes into motion PSFs and 2D kernels.
 - `ForwardModelRunner`: High-level orchestration that produces blurred/noisy images, PSF/OTF/MTF diagnostics, and spectral SNR plots.
@@ -25,9 +25,12 @@ The runner accepts numerous keyword arguments for experiment control:
 | `save_arrays` / `save_pngs` / `save_figures` | Persist NumPy arrays, PNGs, and figure assets to disk. |
 | `output_dir` | Destination directory (defaults to `forward_model_outputs/`). |
 | `legendre_params` | Overrides for MLS code construction (polynomial order, randomization, etc.). |
+| `image_mode` | `'grayscale'` (default) or `'rgb'` when loading DIV2K frames. |
 
 Consult the docstrings in `runner.py` (forward runner) and the helper modules (`patterns.py`,
 `optics.py`, `noise.py`, `metrics.py`) for the full list of options and default values.
+
+When using DIV2K via the CLI you can pass `--auto-download` to fetch the requested subset automatically if it is not already present under `--div2k-root`.
 
 ## Example Usage
 ```python

@@ -5,6 +5,7 @@ Physics-aware motion deblurring toolkit that simulates coded-exposure capture, e
 ## Highlights
 - Forward simulator for box, random, and Legendre flutter-shutter patterns
 - Poisson-Gaussian noise injection and spectral SNR diagnostics under photon budgets
+- Optional RGB processing (`--image-mode rgb`) to keep color channels through the forward model
 - Extensible runner API (`ForwardModelRunner`, `run_forward_model`) for future PnP / HQS integration
 - Documentation assets sourced from the course proposal with summarized objectives and timeline
 
@@ -26,14 +27,15 @@ Physics-aware motion deblurring toolkit that simulates coded-exposure capture, e
    ```
    Generated figures and arrays are written to `forward_model_outputs/` when the saving flags are enabled.
 
-4. Run the forward model on DIV2K low-resolution frames (download DIV2K separately and point to its root):
+4. Run the forward model on DIV2K low-resolution frames (download DIV2K separately and point to its root, or supply `--auto-download` to fetch it automatically):
    ```bash
    python -m mtf_aware_deblurring.forward_pipeline \
      --div2k-root path/to/DIV2K \
+     --image-mode rgb \
      --limit 10 \
      --save-arrays --save-figures --save-pngs
    ```
-   Outputs land in `forward_model_outputs/div2k/<image_id>/`.
+   By default outputs land in `src/mtf_aware_deblurring/forward_model_outputs/div2k/<image_id>/`. Override the location with `--output-dir <path>` if you prefer a different workspace.
 
 ## Repository Layout
 - `src/mtf_aware_deblurring/runner.py` - core forward-imaging runner and CLI demo harness
