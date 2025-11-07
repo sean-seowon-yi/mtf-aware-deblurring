@@ -34,7 +34,7 @@ When using DIV2K via the CLI you can pass `--auto-download` to fetch the request
 
 ## Wiener Baseline
 - `reconstruction/wiener.py` implements a reusable Wiener filter and a convenience helper (`run_wiener_baseline`) that takes the forward-model outputs plus the clean scene and returns reconstructions + PSNR.
-- `pipelines/reconstruct.py` batches this baseline over DIV2K:
+- `pipelines/reconstruct.py` batches this baseline over DIV2K (`--method wiener`):
   ```bash
   python -m mtf_aware_deblurring.pipelines.reconstruct \
     --div2k-root data --image-mode rgb --limit 10 --auto-download \
@@ -65,3 +65,13 @@ The `results` dictionary contains PSFs, OTFs, MTFs, blurred measurements, noise 
 - Integrate the runner with PnP / HQS loops that adapt denoising strength based on the computed MTF.
 - Explore additional codes (e.g., m-sequences, learned binary patterns) and longer exposure settings.
 - Capture real motion data and validate the forward model against measured PSFs/MTFs.
+- `reconstruction/richardson_lucy.py` implements a damped Richardson–Lucy variant with optional TV and Gaussian smoothing (`run_richardson_lucy_baseline`).
+- Run via the same CLI with `--method rl`:
+  ```bash
+  python -m mtf_aware_deblurring.pipelines.reconstruct \
+    --div2k-root data --image-mode rgb --limit 10 --auto-download \
+    --method rl --rl-iterations 12 --rl-damping 0.7 \
+    --rl-tv-weight 1e-3 --rl-smooth-weight 0.4 --rl-smooth-sigma 1.5 \
+    --collect-only
+  ```
+  Outputs land in `forward_model_outputs/reconstruction/rl/<image_id>/...` with `rl_psnr.csv`.

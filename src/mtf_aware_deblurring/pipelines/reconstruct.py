@@ -9,11 +9,14 @@ import imageio.v2 as imageio
 import numpy as np
 
 from .common import run_forward_batches
-from ..reconstruction import run_wiener_baseline
+from ..reconstruction import (
+    run_wiener_baseline,
+    run_richardson_lucy_baseline,
+)
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="Run Wiener baseline on DIV2K using the forward model.")
+    parser = argparse.ArgumentParser(description="Run reconstruction baselines on DIV2K using the forward model.")
     parser.add_argument("--div2k-root", type=Path, required=True, help="Path containing DIV2K_* folders.")
     parser.add_argument("--subset", default="train", choices=["train", "valid"], help="DIV2K subset.")
     parser.add_argument("--degradation", default="bicubic", help="DIV2K degradation label.")
@@ -33,17 +36,44 @@ def parse_args(argv=None):
     parser.add_argument("--save-arrays", action="store_true", help="Save forward-model arrays.")
     parser.add_argument("--save-figures", action="store_true", help="Save forward-model figures.")
     parser.add_argument("--save-pngs", action="store_true", help="Save forward-model PNGs.")
-    parser.add_argument("--save-recon", action="store_true", help="Save Wiener reconstructions as PNGs.")
+    parser.add_argument("--save-recon", action="store_true", help="Save reconstructions as PNGs.")
     parser.add_argument("--output-dir", type=Path, help="Base directory for outputs.")
+    parser.add_argument("--method", choices=["wiener", "rl"], default="wiener", help="Reconstruction method to run.")
     parser.add_argument("--wiener-k", type=float, default=1e-3, help="Wiener filter constant k.")
+    parser.add_argument("--rl-iterations", type=int, default=30, help="Richardson-Lucy iteration count.")
+    parser.add_argument("--rl-damping", type=float, default=1.0, help="Richardson-Lucy damping exponent.")
+    parser.add_argument("--rl-tv-weight", type=float, default=0.0, help="Richardson-Lucy TV regularization weight.")
+    parser.add_argument("--rl-smooth-weight", type=float, default=0.1, help="Richardson-Lucy Gaussian smoothing weight.")
+    parser.add_argument("--rl-smooth-sigma", type=float, default=1.0, help="Gaussian smoothing sigma.")
     parser.add_argument("--collect-only", action="store_true", help="Skip per-image folders; only write summary CSV.")
     return parser.parse_args(argv)
 
 
-def save_recon_image(path: Path, pattern: str, image: np.ndarray) -> None:
+def save_recon_image(path: Path, method: str, pattern: str, image: np.ndarray) -> None:
     path.mkdir(parents=True, exist_ok=True)
     png = (np.clip(image, 0, 1) * 255).astype(np.uint8)
-    imageio.imwrite(path / f"wiener_{pattern}.png", png)
+    filename = f"{method}_{pattern}.png"
+    imageio.imwrite(path / filename, png)
+
+
+def run_method(method: str, batch, args):
+    if method == "wiener":
+        return run_wiener_baseline(
+            batch.image,
+            batch.forward_outputs["patterns"],  # type: ignore[index]
+            k=args.wiener_k,
+        )
+    if method == "rl":
+        return run_richardson_lucy_baseline(
+            batch.image,
+            batch.forward_outputs["patterns"],  # type: ignore[index]
+            iterations=args.rl_iterations,
+            damping=args.rl_damping,
+            tv_weight=args.rl_tv_weight,
+            smooth_weight=args.rl_smooth_weight,
+            smooth_sigma=args.rl_smooth_sigma,
+        )
+    raise ValueError(f"Unsupported method: {method}")
 
 
 def main(argv=None):
@@ -51,23 +81,20 @@ def main(argv=None):
     summaries: List[Dict[str, object]] = []
     baseline_root: Optional[Path] = None
 
-    persist_outputs = not args.collect_only
-    save_recon = args.save_recon and persist_outputs
+    persist_outputs = (not args.collect_only) or args.save_recon
+    save_recon = args.save_recon
+    method = args.method.lower()
 
-    for batch in run_forward_batches(args, baseline_name="wiener", persist_outputs=persist_outputs):
+    for batch in run_forward_batches(args, baseline_name=method, persist_outputs=persist_outputs):
         if baseline_root is None:
             baseline_root = batch.baseline_root
 
-        recon_results = run_wiener_baseline(
-            batch.image,
-            batch.forward_outputs["patterns"],  # type: ignore[index]
-            k=args.wiener_k,
-        )
+        recon_results = run_method(method, batch, args)
 
         for pattern, result in recon_results.items():
             if save_recon and batch.output_dir is not None:
-                recon_dir = batch.output_dir / "wiener"
-                save_recon_image(recon_dir, pattern, result.reconstruction)
+                recon_dir = batch.output_dir / method
+                save_recon_image(recon_dir, method, pattern, result.reconstruction)
             summaries.append(
                 {
                     "image": batch.image_path.name,
@@ -81,7 +108,10 @@ def main(argv=None):
         print("No images processed; nothing to report.")
         return
 
-    csv_path = baseline_root / "wiener_psnr.csv"
+    pattern_order = {p: idx for idx, p in enumerate(args.patterns)} if hasattr(args, 'patterns') else {}
+    summaries.sort(key=lambda row: (row['image'], pattern_order.get(row['pattern'], len(pattern_order))))
+
+    csv_path = baseline_root / f"{method}_psnr.csv"
     with open(csv_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["image", "pattern", "psnr"])
         writer.writeheader()

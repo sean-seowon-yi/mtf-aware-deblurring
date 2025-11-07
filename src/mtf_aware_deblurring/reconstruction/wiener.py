@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 import numpy as np
 from numpy.fft import fft2, ifft2, ifftshift
 
 from ..metrics import psnr
 from ..optics import pad_to_shape
+from .results import ReconstructionResult
 
 
 def _wiener_filter_kernel(kernel: np.ndarray, image_shape: tuple[int, int], k: float) -> np.ndarray:
@@ -33,19 +32,17 @@ def wiener_deconvolution(image: np.ndarray, kernel: np.ndarray, k: float = 1e-3)
     return np.stack(channels, axis=-1)
 
 
-@dataclass
-class WienerResult:
-    reconstruction: np.ndarray
-    psnr: float
-
-
-def run_wiener_baseline(scene: np.ndarray, forward_results: Dict[str, Dict[str, np.ndarray]], k: float = 1e-3) -> Dict[str, WienerResult]:
-    outputs: Dict[str, WienerResult] = {}
+def run_wiener_baseline(
+    scene: np.ndarray,
+    forward_results: Dict[str, Dict[str, np.ndarray]],
+    k: float = 1e-3,
+) -> Dict[str, ReconstructionResult]:
+    outputs: Dict[str, ReconstructionResult] = {}
     for pattern, data in forward_results.items():
         recon = wiener_deconvolution(data["noisy"], data["kernel"], k=k)
         value = psnr(scene, recon)
-        outputs[pattern] = WienerResult(reconstruction=recon, psnr=value)
+        outputs[pattern] = ReconstructionResult(reconstruction=recon, psnr=value)
     return outputs
 
 
-__all__ = ["wiener_deconvolution", "run_wiener_baseline", "WienerResult"]
+__all__ = ["wiener_deconvolution", "run_wiener_baseline"]
