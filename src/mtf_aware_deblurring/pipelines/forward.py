@@ -10,13 +10,13 @@ from urllib.request import urlopen
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .datasets import DIV2KDataset
-from .metrics import spectral_snr
-from .noise import add_poisson_gaussian
-from .optics import fft_convolve2d, kernel2d_from_psf1d, motion_psf_from_code, mtf_from_kernel
-from .patterns import make_exposure_code, resolve_legendre_prime
-from .synthetic import SyntheticData
-from .utils import axes_as_list, configure_matplotlib_defaults, default_output_dir, finalize_figure
+from ..datasets import DIV2KDataset
+from ..metrics import spectral_snr
+from ..noise import add_poisson_gaussian
+from ..optics import fft_convolve2d, kernel2d_from_psf1d, motion_psf_from_code, mtf_from_kernel
+from ..patterns import make_exposure_code, resolve_legendre_prime
+from ..synthetic import SyntheticData
+from ..utils import axes_as_list, configure_matplotlib_defaults, default_output_dir, finalize_figure
 
 DEFAULT_SEED = 0
 DIV2K_BASE_URL = "https://data.vision.ee.ethz.ch/cvl/DIV2K"
@@ -558,11 +558,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _expected_div2k_dir(args: argparse.Namespace) -> Path:
+def expected_div2k_dir(args: argparse.Namespace) -> Path:
     return Path(args.div2k_root) / f"DIV2K_{args.subset}_LR_{args.degradation}" / args.scale.upper()
 
 
-def _download_div2k_subset(args: argparse.Namespace, target_dir: Path) -> None:
+def download_div2k_subset(args: argparse.Namespace, target_dir: Path) -> None:
     root = Path(args.div2k_root)
     root.mkdir(parents=True, exist_ok=True)
     zip_name = f"DIV2K_{args.subset}_LR_{args.degradation}_{args.scale.upper()}.zip"
@@ -599,8 +599,8 @@ def _download_div2k_subset(args: argparse.Namespace, target_dir: Path) -> None:
         )
 
 
-def _ensure_div2k_available(args: argparse.Namespace) -> None:
-    target_dir = _expected_div2k_dir(args)
+def ensure_div2k_available(args: argparse.Namespace) -> None:
+    target_dir = expected_div2k_dir(args)
     if target_dir.exists():
         return
     if not args.auto_download:
@@ -608,7 +608,7 @@ def _ensure_div2k_available(args: argparse.Namespace) -> None:
             f"DIV2K subset not found at {target_dir}. "
             "Download it manually or rerun with --auto-download."
         )
-    _download_div2k_subset(args, target_dir)
+    download_div2k_subset(args, target_dir)
 
 
 def _maybe_resolve_output_dir(base: Optional[Path]) -> Optional[Path]:
@@ -660,7 +660,7 @@ def _run_synthetic_demo(args: argparse.Namespace) -> None:
 
 def _run_div2k_batch(args: argparse.Namespace) -> None:
     assert args.div2k_root is not None
-    _ensure_div2k_available(args)
+    ensure_div2k_available(args)
     dataset = DIV2KDataset(
         root=args.div2k_root,
         subset=args.subset,

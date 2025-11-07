@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .datasets import DIV2KDataset
-from .metrics import spectral_snr
+from .metrics import spectral_snr, psnr
 from .noise import add_poisson_gaussian
 from .optics import fft_convolve2d, kernel2d_from_psf1d, motion_psf_from_code, mtf_from_kernel, otf2d, pad_to_shape
 from .patterns import (
@@ -14,7 +14,8 @@ from .patterns import (
     previous_prime,
     resolve_legendre_prime,
 )
-from .runner import DEFAULT_SEED, ForwardModelRunner, main, run_forward_model
+from .pipelines.forward import DEFAULT_SEED, ForwardModelRunner, main, run_forward_model
+from .reconstruction import WienerResult, run_wiener_baseline, wiener_deconvolution
 from .synthetic import SyntheticData, normalize01
 from .utils import (
     axes_as_list,
@@ -52,7 +53,11 @@ __all__ = [
     "mtf_from_kernel",
     "add_poisson_gaussian",
     "spectral_snr",
+    "psnr",
     "DIV2KDataset",
+    "wiener_deconvolution",
+    "run_wiener_baseline",
+    "WienerResult",
 ]
 
 

@@ -1,54 +1,116 @@
 # MTF-Aware Deblurring
 
-Physics-aware motion deblurring toolkit that simulates coded-exposure capture, evaluates modulation transfer functions (MTFs), and prepares the groundwork for plug-and-play (PnP) reconstruction with adaptive priors. This repository is bootstrapped from the original Colab forward-model notebook and the CSC2529 project proposal.
+A research-grade toolkit for coded-exposure motion-blur simulation, physics-aware reconstruction, and baseline benchmarking. The project originated from the CSC2529 course proposal and has since been refactored into a reusable Python package with CLI entry points, dataset loaders, and baseline scripts.
 
-## Highlights
-- Forward simulator for box, random, and Legendre flutter-shutter patterns
-- Poisson-Gaussian noise injection and spectral SNR diagnostics under photon budgets
-- Optional RGB processing (`--image-mode rgb`) to keep color channels through the forward model
-- Extensible runner API (`ForwardModelRunner`, `run_forward_model`) for future PnP / HQS integration
-- Documentation assets sourced from the course proposal with summarized objectives and timeline
+---
 
-## Getting Started
-1. Create and activate a virtual environment (example uses `venv`):
-   ```bash
-   python -m venv .venv
-   .venv\\Scripts\\activate
-   ```
-2. Install the core dependencies and project package:
-   ```bash
-   python -m pip install --upgrade pip
-   pip install -r requirements.txt
-   pip install -e .
-   ```
-3. Smoke-test the forward model (plots will open via Matplotlib):
-   ```bash
-   python -m mtf_aware_deblurring.forward_pipeline
-   ```
-   Generated figures and arrays are written to `forward_model_outputs/` when the saving flags are enabled.
+## Capabilities at a Glance
 
-4. Run the forward model on DIV2K low-resolution frames (download DIV2K separately and point to its root, or supply `--auto-download` to fetch it automatically):
-   ```bash
-   python -m mtf_aware_deblurring.forward_pipeline \
-     --div2k-root path/to/DIV2K \
-     --image-mode rgb \
-     --limit 10 \
-     --save-arrays --save-figures --save-pngs
-   ```
-   By default outputs land in `src/mtf_aware_deblurring/forward_model_outputs/div2k/<image_id>/`. Override the location with `--output-dir <path>` if you prefer a different workspace.
+- **Forward imaging pipeline** (`pipelines/forward.py`):
+  - Box, random, and Legendre (MLS) shutter codes with configurable taps `T`, blur length, and duty cycle.
+  - Poisson–Gaussian noise injection under a photon budget.
+  - Optional RGB processing and automatic DIV2K downloading (`--image-mode`, `--auto-download`).
+  - Matplotlib visualization hooks plus structured array/PNG exports per pattern.
+- **Dataset integration**:
+  - `DIV2KDataset` streams low-res splits with on-the-fly resizing and color selection.
+  - Helper functions ensure the required subset is downloaded before running experiments.
+- **Baselines**:
+  - Reusable Wiener filter (`recon/wiener.py`) with PSNR evaluation.
+  - `baselines/wiener_cli.py` automates forward simulation + deconvolution + CSV summaries.
+- **Documentation**:
+  - Proposal summary, forward-model overview, and a growing `docs/baselines/` section with qualitative/quantitative evidence (e.g., `wiener_baseline.md`).
 
-## Repository Layout
-- `src/mtf_aware_deblurring/runner.py` - core forward-imaging runner and CLI demo harness
-- `src/mtf_aware_deblurring/forward_pipeline.py` - compatibility shim that re-exports the public API for `python -m ...`
-- `src/mtf_aware_deblurring/{datasets,patterns,optics,noise,metrics,synthetic,utils}.py` - modular helpers for data loading, exposure codes, PSFs/MTFs, noise models, and synthetic scenes
-- `docs/project_proposal.pdf` - original course proposal detailing motivation, prior work, milestones, and evaluation plan
-- `docs/proposal_summary.md` - text summary extracted from the proposal for quick reference
-- `pyproject.toml` / `requirements.txt` - packaging metadata and runtime dependencies
+---
 
-## Next Steps
-- Wire up classical deconvolution baselines (Wiener, Richardson-Lucy) using the exported PSFs
-- Integrate plug-and-play / HQS solvers with physics-aware denoising schedules informed by the simulated MTF
-- Run the ablation grid (box vs coded exposure, schedule variants, code families) under equal photon budgets
-- Extend documentation with experiment tracking, data management, and reproducibility checklists as the project matures
+## Installation & Environment
 
-For full context, read the [proposal summary](docs/proposal_summary.md) or the original [project proposal PDF](docs/project_proposal.pdf).
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+pip install -e .
+```
+
+All outputs default to `src/mtf_aware_deblurring/forward_model_outputs/…`; override via `--output-dir` when needed.
+
+---
+
+## Forward Model Usage
+
+### Quick smoke test (synthetic scenes)
+```bash
+python -m mtf_aware_deblurring.forward_pipeline
+```
+
+### DIV2K batch with RGB processing and auto-downloading
+```bash
+python -m mtf_aware_deblurring.forward_pipeline ^
+  --div2k-root data ^
+  --subset train --degradation bicubic --scale X2 ^
+  --image-mode rgb ^
+  --limit 10 ^
+  --auto-download ^
+  --save-arrays --save-figures --save-pngs
+```
+Outputs land beneath `forward_model_outputs/div2k/<image_id>/` (arrays, figures, PNGs per pattern).
+
+### Programmatic usage
+```python
+from pathlib import Path
+from mtf_aware_deblurring import SyntheticData, run_forward_model
+
+scene = SyntheticData("Checker Board").create_img(seed=0)
+results = run_forward_model(scene, patterns=["box", "random", "legendre"])
+psf = results["patterns"]["legendre"]["psf"]
+```
+
+---
+
+## Baseline: Wiener Deconvolution
+
+CLI (grayscale example):
+```bash
+python -m mtf_aware_deblurring.pipelines.reconstruct ^
+  --div2k-root data ^
+  --subset train --degradation bicubic --scale X2 ^
+  --image-mode grayscale ^
+  --limit 10 ^
+  --auto-download ^
+  --wiener-k 1e-3 ^
+  --save-recon
+```
+
+Artifacts:
+- `forward_model_outputs/reconstruction/wiener/<image_id>/wiener/*.png` (per-pattern reconstructions).
+- `forward_model_outputs/reconstruction/wiener/wiener_psnr.csv` (per-image PSNR entries).
+- Qualitative crops + tables documented in `docs/baselines/wiener_baseline.md`.
+
+You can adjust noise parameters (`--photon-budget`, `--read-noise`) or `--wiener-k` to explore trade-offs before moving on to ADMM/PnP baselines.
+Add `--collect-only` to skip per-image folders and record only the consolidated CSV.
+
+---
+
+## Repository Layout (Highlights)
+
+- `src/mtf_aware_deblurring/forward_pipeline.py` – compatibility shim exposed via `python -m`.
+- `src/mtf_aware_deblurring/pipelines/` - CLI entry points (`forward.py`, `reconstruct.py`) plus shared batch helpers.
+- `src/mtf_aware_deblurring/reconstruction/` - reusable reconstruction algorithms (currently the Wiener filter utilities).
+- `src/mtf_aware_deblurring/forward_model_outputs/` - default artifact directories (`div2k/<id>/…`, `reconstruction/<method>/…`).
+- `src/mtf_aware_deblurring/{datasets,patterns,optics,noise,metrics,synthetic,utils}.py` – reusable building blocks.
+- `docs/` – proposal, summaries, and baseline reports (`docs/baselines/wiener_baseline.md` with qualitative crops and tables).
+
+---
+
+## Current Status & Next Steps
+
+- ✅ Refactored forward model into a reusable module with CLI.
+- ✅ DIV2K integration with auto-download and RGB support.
+- ✅ Wiener filter baseline + qualitative/quantitative documentation.
+- ⏳ Upcoming work:
+  - Richardson–Lucy and basic ADMM/PNP baselines built on top of the same pipelines.
+  - Physics-aware PnP scheduling experiments (MTF-weighted denoiser schedules).
+  - Extended ablations: photon budget sweeps, exposure code families, schedule variants.
+  - Additional metrics (SSIM, LPIPS) and experiment logging in `docs/experiments/`.
+
+For historical context, consult the [proposal summary](docs/proposal_summary.md) or the original [project proposal PDF](docs/project_proposal.pdf). Baseline details and figures live in [docs/baselines/wiener_baseline.md](docs/baselines/wiener_baseline.md).

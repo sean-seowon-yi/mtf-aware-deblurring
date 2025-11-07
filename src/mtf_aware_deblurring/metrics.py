@@ -24,4 +24,11 @@ def spectral_snr(img_clean: np.ndarray, img_noisy: np.ndarray, eps: float = 1e-1
     raise ValueError("spectral_snr expects 2D or 3D inputs.")
 
 
-__all__ = ["spectral_snr"]
+def psnr(reference: np.ndarray, estimate: np.ndarray, data_range: float = 1.0, eps: float = 1e-12) -> float:
+    mse = np.mean((reference - estimate) ** 2)
+    if mse <= eps:
+        return float("inf")
+    return 10 * np.log10((data_range ** 2) / mse)
+
+
+__all__ = ["spectral_snr", "psnr"]

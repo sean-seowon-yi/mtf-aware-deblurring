@@ -1,7 +1,7 @@
 # Forward Model Overview
 
-This module is derived from the original Colab notebook and now lives across `mtf_aware_deblurring.runner` (or
-the compatibility shim `mtf_aware_deblurring.forward_pipeline`).
+This module is derived from the original Colab notebook and now lives across `mtf_aware_deblurring.pipelines.forward`
+(or the compatibility shim `mtf_aware_deblurring.forward_pipeline`).
 
 ## Key Components
 - `SyntheticData`: Generates synthetic test scenes (checkerboard, rings) with optional random seeds.
@@ -31,6 +31,16 @@ Consult the docstrings in `runner.py` (forward runner) and the helper modules (`
 `optics.py`, `noise.py`, `metrics.py`) for the full list of options and default values.
 
 When using DIV2K via the CLI you can pass `--auto-download` to fetch the requested subset automatically if it is not already present under `--div2k-root`.
+
+## Wiener Baseline
+- `reconstruction/wiener.py` implements a reusable Wiener filter and a convenience helper (`run_wiener_baseline`) that takes the forward-model outputs plus the clean scene and returns reconstructions + PSNR.
+- `pipelines/reconstruct.py` batches this baseline over DIV2K:
+  ```bash
+  python -m mtf_aware_deblurring.pipelines.reconstruct \
+    --div2k-root data --image-mode rgb --limit 10 --auto-download \
+    --save-recon
+  ```
+  A CSV summary (`wiener_psnr.csv`) and optional reconstructions are emitted under `forward_model_outputs/reconstruction/wiener/<image_id>/`.
 
 ## Example Usage
 ```python

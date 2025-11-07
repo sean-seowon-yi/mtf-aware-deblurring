@@ -16,4 +16,5 @@ pytest_cache/
 .DS_Store
 Thumbs.db
 forward_model_outputs/
+src/mtf_aware_deblurring/forward_model_outputs/
 data/
