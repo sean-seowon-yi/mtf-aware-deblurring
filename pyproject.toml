@@ -18,9 +18,13 @@ dependencies = [
   "matplotlib>=3.5",
   "imageio>=2.31",
   "pillow>=9.0",
-  "ipython>=8.0"
+  "ipython>=8.0",
+  "torch>=2.2"
 ]
 
 [project.urls]
 Repository = "https://github.com/pyazd/mtf-aware-deblurring"
 Proposal = "docs/project_proposal.pdf"
+
+[tool.setuptools.package-data]
+"mtf_aware_deblurring" = ["assets/*.pth"]

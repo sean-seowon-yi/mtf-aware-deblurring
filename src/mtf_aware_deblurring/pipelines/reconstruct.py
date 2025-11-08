@@ -12,6 +12,7 @@ from .common import run_forward_batches
 from ..reconstruction import (
     run_wiener_baseline,
     run_richardson_lucy_baseline,
+    run_adam_denoiser_baseline,
 )
 
 
@@ -38,13 +39,21 @@ def parse_args(argv=None):
     parser.add_argument("--save-pngs", action="store_true", help="Save forward-model PNGs.")
     parser.add_argument("--save-recon", action="store_true", help="Save reconstructions as PNGs.")
     parser.add_argument("--output-dir", type=Path, help="Base directory for outputs.")
-    parser.add_argument("--method", choices=["wiener", "rl"], default="wiener", help="Reconstruction method to run.")
+    parser.add_argument("--method", choices=["wiener", "rl", "adam"], default="wiener", help="Reconstruction method to run.")
     parser.add_argument("--wiener-k", type=float, default=1e-3, help="Wiener filter constant k.")
     parser.add_argument("--rl-iterations", type=int, default=30, help="Richardson-Lucy iteration count.")
     parser.add_argument("--rl-damping", type=float, default=1.0, help="Richardson-Lucy damping exponent.")
     parser.add_argument("--rl-tv-weight", type=float, default=0.0, help="Richardson-Lucy TV regularization weight.")
     parser.add_argument("--rl-smooth-weight", type=float, default=0.1, help="Richardson-Lucy Gaussian smoothing weight.")
     parser.add_argument("--rl-smooth-sigma", type=float, default=1.0, help="Gaussian smoothing sigma.")
+    parser.add_argument("--adam-iters", type=int, default=80, help="ADAM iterations.")
+    parser.add_argument("--adam-lr", type=float, default=0.04, help="ADAM learning rate.")
+    parser.add_argument("--adam-beta1", type=float, default=0.9, help="ADAM beta1.")
+    parser.add_argument("--adam-beta2", type=float, default=0.995, help="ADAM beta2.")
+    parser.add_argument("--adam-denoiser-weight", type=float, default=0.25, help="Blend weight for the deep denoiser (0-1).")
+    parser.add_argument("--adam-denoiser-interval", type=int, default=2, help="Apply the denoiser every N ADAM steps.")
+    parser.add_argument("--denoiser-weights", type=Path, help="Optional path to TinyDenoiser weights (.pth). Defaults to bundled weights.")
+    parser.add_argument("--denoiser-device", choices=["cpu", "cuda"], help="Force denoiser device (defaults to auto).")
     parser.add_argument("--collect-only", action="store_true", help="Skip per-image folders; only write summary CSV.")
     return parser.parse_args(argv)
 
@@ -72,6 +81,19 @@ def run_method(method: str, batch, args):
             tv_weight=args.rl_tv_weight,
             smooth_weight=args.rl_smooth_weight,
             smooth_sigma=args.rl_smooth_sigma,
+        )
+    if method == "adam":
+        return run_adam_denoiser_baseline(
+            batch.image,
+            batch.forward_outputs["patterns"],  # type: ignore[index]
+            iterations=args.adam_iters,
+            lr=args.adam_lr,
+            beta1=args.adam_beta1,
+            beta2=args.adam_beta2,
+            denoiser_weight=args.adam_denoiser_weight,
+            denoiser_interval=args.adam_denoiser_interval,
+            denoiser_weights=args.denoiser_weights,
+            denoiser_device=args.denoiser_device,
         )
     raise ValueError(f"Unsupported method: {method}")
 

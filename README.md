@@ -16,9 +16,10 @@ A research-grade toolkit for coded-exposure motion-blur simulation, physics-awar
   - Helper functions ensure the required subset is downloaded before running experiments.
 - **Baselines**:
   - Reusable Wiener + Richardson-Lucy algorithms live under `reconstruction/`.
-  - `pipelines/reconstruct.py` automates running either method (and future ones) with shared batching + CSV output.
+  - `pipelines/reconstruct.py` automates running either method (and now the ADAM+TinyDenoiser baseline) with shared batching + CSV output.
+  - Plug-and-play ADAM couples the forward physics with a bundled deep denoiser (see the baseline section below).
 - **Documentation**:
-  - Proposal summary, forward-model overview, and a growing `docs/baselines/` section with qualitative/quantitative evidence (e.g., `wiener_baseline.md`).
+  - Proposal summary, forward-model overview, and a growing `docs/baselines/` section with qualitative/quantitative evidence (e.g., `wiener_baseline.md`, `rl_baseline.md`, `adam_denoiser_baseline.md`).
 
 ---
 
@@ -31,6 +32,8 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 pip install -e .
 ```
+
+> **PyTorch note**: the ADAM+TinyDenoiser baseline depends on PyTorch (`torch>=2.2`). The CPU wheel installs via `requirements.txt`; install the CUDA build from [pytorch.org](https://pytorch.org/get-started/locally/) if you want GPU acceleration.
 
 All outputs default to `src/mtf_aware_deblurring/forward_model_outputs/`; override via `--output-dir` when needed.
 
@@ -115,6 +118,34 @@ Artifacts mirror the Wiener layout but live under `forward_model_outputs/reconst
 
 Aggregated RGB results (800 images): Box 19.01 dB, Random 19.00 dB, Legendre 19.02 dB. Detailed setup in `docs/baselines/rl_baseline.md`.
 
+## Baseline: ADAM + TinyDenoiser (Plug-and-Play)
+
+We couple the forward-model data term with a lightweight residual CNN denoiser (`TinyDenoiser`) that was trained on 5,120 DIV2K patches via `scripts/train_tiny_denoiser.py`. The pretrained weights ship with the repo under `src/mtf_aware_deblurring/assets/tiny_denoiser_sigma15.pth`.
+
+CLI example (full DIV2K sweep, RGB):
+```bash
+python -m mtf_aware_deblurring.pipelines.reconstruct ^
+  --div2k-root data ^
+  --subset train --degradation bicubic --scale X2 ^
+  --image-mode rgb --limit 0 ^
+  --method adam ^
+  --adam-iters 30 ^
+  --adam-lr 0.065 ^
+  --adam-denoiser-weight 0.38 ^
+  --adam-denoiser-interval 3 ^
+  --collect-only
+```
+
+Aggregated RGB results (800 images):
+
+| Pattern  | Mean PSNR (dB) | Δ vs RL |
+|----------|----------------|--------|
+| box      | 22.16          | +3.15  |
+| random   | 22.78          | +3.77  |
+| legendre | 22.69          | +3.67  |
+
+See `docs/baselines/adam_denoiser_baseline.md` for training details, hyperparameters, and qualitative notes.
+
 
 ---
 
@@ -122,9 +153,11 @@ Aggregated RGB results (800 images): Box 19.01 dB, Random 19.00 dB, Legendre 19.
 
 - `src/mtf_aware_deblurring/forward_pipeline.py`  compatibility shim exposed via `python -m`.
 - `src/mtf_aware_deblurring/pipelines/` - CLI entry points (`forward.py`, `reconstruct.py`) plus shared batch helpers.
-- `src/mtf_aware_deblurring/reconstruction/` - reusable reconstruction algorithms (currently the Wiener filter utilities).
+- `src/mtf_aware_deblurring/reconstruction/` - reusable reconstruction algorithms (Wiener, Richardson-Lucy, ADAM+TinyDenoiser).
+- `src/mtf_aware_deblurring/denoisers/` & `src/mtf_aware_deblurring/assets/` - TinyDenoiser architecture plus the pretrained weights used by the ADAM baseline.
 - `src/mtf_aware_deblurring/forward_model_outputs/` - default artifact directories (`div2k/<id>/`, `reconstruction/<method>/`).
 - `src/mtf_aware_deblurring/{datasets,patterns,optics,noise,metrics,synthetic,utils}.py`  reusable building blocks.
+- `scripts/train_tiny_denoiser.py` - helper to regenerate the residual denoiser if you change the noise model.
 - `docs/`  proposal, summaries, and baseline reports (`docs/baselines/wiener_baseline.md` with qualitative crops and tables).
 
 ---
@@ -133,9 +166,8 @@ Aggregated RGB results (800 images): Box 19.01 dB, Random 19.00 dB, Legendre 19.
 
 -  Refactored forward model into a reusable module with CLI.
 -  DIV2K integration with auto-download and RGB support.
--  Wiener filter baseline + qualitative/quantitative documentation.
+-  Baseline coverage: Wiener, Richardson-Lucy, and ADAM+TinyDenoiser (each with quantitative reports in `docs/baselines/`).
 -  Upcoming work:
-  - Richardson-Lucy and basic ADMM/PNP baselines built on top of the same pipelines.
   - Physics-aware PnP scheduling experiments (MTF-weighted denoiser schedules).
   - Extended ablations: photon budget sweeps, exposure code families, schedule variants.
   - Additional metrics (SSIM, LPIPS) and experiment logging in `docs/experiments/`.
