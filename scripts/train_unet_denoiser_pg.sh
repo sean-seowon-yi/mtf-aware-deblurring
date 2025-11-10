@@ -40,6 +40,7 @@ export PIP_CACHE_DIR="$PIP_CACHE"
 cd "$REPO"
 python -m pip install --upgrade pip wheel
 pip install --no-cache-dir -e .
+pip install --no-cache-dir scipy
 
 echo "[CUDA]" && nvidia-smi || true
 python - <<'PY'
