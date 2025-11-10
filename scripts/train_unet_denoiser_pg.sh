@@ -47,7 +47,7 @@ import torch; print("torch.cuda.is_available:", torch.cuda.is_available())
 print("device:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu")
 PY
 
-python "$REPO/train_unet_denoiser.py" \
+python "$REPO/scripts/train_unet_denoiser.py" \
   --dataset-root "$DATA_ROOT" \
   --output "$CKPT_OUT" \
   --max-images "$MAX_IMGS" \
