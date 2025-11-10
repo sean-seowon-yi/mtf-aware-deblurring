@@ -16,9 +16,11 @@ A research-grade toolkit for coded-exposure motion-blur simulation, physics-awar
   - Helper functions ensure the required subset is downloaded before running experiments.
 - **Baselines**:
   - Reusable Wiener + Richardson-Lucy algorithms live under `reconstruction/`.
-  - `pipelines/reconstruct.py` automates running either method (and now the ADAM+TinyDenoiser baseline) with shared batching + CSV output.
-  - Plug-and-play ADAM couples the forward physics with a bundled deep denoiser (see the baseline section below).
-  - New ADMM variants support both residual CNN denoisers and score-based diffusion priors (TinyScoreUNet adapter inspired by DPS/ADMM-Score).
+  - `pipelines/reconstruct.py` orchestrates ADAM, ADMM (denoiser and diffusion variants), and shared batching/CSV/reporting.
+  - Plug-and-play solvers support multiple priors: the bundled TinyDenoiser, a converted DnCNN σ=15 model, a UNet denoiser trained via `scripts/train_unet_denoiser.py`, and a TinyScoreUNet diffusion prior (see the baseline section below).
+- **Device-aware training/runtime**:
+  - `torch_utils.resolve_device` lets every CLI flag accept `cpu`, `cuda`, or `dml` (DirectML) so you can target NVIDIA GPUs, AMD GPUs, or CPU-only runs without code changes.
+  - Training scripts (`scripts/train_*`) detect the same device flag, making it straightforward to fine-tune priors on NVIDIA (CUDA) or AMD (DirectML/ROCm) hardware.
 - **Documentation**:
   - Proposal summary, forward-model overview, and a growing `docs/baselines/` section with qualitative/quantitative evidence (e.g., `wiener_baseline.md`, `rl_baseline.md`, `adam_denoiser_baseline.md`).
 
@@ -37,6 +39,19 @@ pip install -e .
 > **PyTorch note**: the ADAM+TinyDenoiser baseline depends on PyTorch (`torch>=2.2`). The CPU wheel installs via `requirements.txt`; install the CUDA build from [pytorch.org](https://pytorch.org/get-started/locally/) if you want GPU acceleration.
 
 All outputs default to `src/mtf_aware_deblurring/forward_model_outputs/`; override via `--output-dir` when needed.
+
+## Device & GPU Support
+
+Every plug-and-play baseline accepts `--denoiser-device` (and, for diffusion, `--diffusion-device`) with one of:
+
+- `cpu` – portable runs with no GPU.
+- `cuda` – NVIDIA GPUs using the standard CUDA PyTorch wheels.
+- `dml` – Windows/DirectML backend for AMD GPUs (`pip install torch-directml -f https://aka.ms/torch-directml`), or ROCm wheels on Linux.
+
+Tips:
+- Keep GPU-specific installs in their own conda/venv environments (e.g., `conda create -n amd python=3.10` then install `torch-directml` plus project deps).
+- Verify the backend with `python -c "import torch, torch_directml; print(torch.__version__); print(torch_directml.device())"`.
+- Training scripts accept the same device flag, so the checkpoints you generate for NVIDIA (CUDA) or AMD (DirectML/ROCm) can be re-used directly by the CLI.
 
 ---
 
@@ -119,11 +134,11 @@ Artifacts mirror the Wiener layout but live under `forward_model_outputs/reconst
 
 Aggregated RGB results (800 images): Box 19.01 dB, Random 19.00 dB, Legendre 19.02 dB. Detailed setup in `docs/baselines/rl_baseline.md`.
 
-## Baseline: ADAM + TinyDenoiser (Plug-and-Play)
+## Baseline: ADAM + Plug-and-Play Denoisers
 
-We couple the forward-model data term with a lightweight residual CNN denoiser (`TinyDenoiser`) that was trained on 5,120 DIV2K patches via `scripts/train_tiny_denoiser.py`. The pretrained weights ship with the repo under `src/mtf_aware_deblurring/assets/tiny_denoiser_sigma15.pth`.
+The ADAM solver treats the coded-exposure forward model as the data term and injects a denoiser every few iterations (PnP-ADAM). You can swap priors via `--denoiser-type` and control how aggressively they are blended with `--adam-denoiser-weight` / `--adam-denoiser-interval`.
 
-CLI example (full DIV2K sweep, RGB):
+CLI example (RGB sweep, DNCCN prior):
 ```bash
 python -m mtf_aware_deblurring.pipelines.reconstruct ^
   --div2k-root data ^
@@ -135,34 +150,32 @@ python -m mtf_aware_deblurring.pipelines.reconstruct ^
   --adam-denoiser-weight 0.38 ^
   --adam-denoiser-interval 3 ^
   --denoiser-type dncnn ^
+  --denoiser-device cuda ^
   --collect-only
 ```
 
-Aggregated RGB results (800 images):
-
-| Pattern  | Mean PSNR (dB) | Δ vs RL |
-|----------|----------------|--------|
-| box      | 22.16          | +3.15  |
-| random   | 22.78          | +3.77  |
-| legendre | 22.69          | +3.67  |
-
-Swap `--denoiser-type tiny` (default) for lightweight experiments, `--denoiser-type dncnn` for a stronger pretrained prior, or `--denoiser-type unet` if you train the bundled UNet on your own noise model. For a quick grayscale smoke test (DIV2K, 5 frames, 128×128 crops, Poisson-Gaussian noise) we observed:
-
+### Quick 5-image grayscale smoke test (DIV2K/X2, 128×128 crops)
 | Denoiser | Box | Random | Legendre | Notes |
 |----------|-----|--------|----------|-------|
-| tiny     | 19.99 | 19.95 | 20.37 | bundled residual CNN, CPU-friendly |
-| dncnn    | **20.43** | **23.12** | **23.78** | converted from the public σ=15 checkpoint |
-| unet     | 20.37 | 20.93 | 21.33 | trained via `scripts/train_unet_denoiser.py` (3 epochs, 50 DIV2K images) |
+| tiny (`--denoiser-type tiny`) | 19.99 | 19.95 | 20.37 | Bundled residual CNN (σ≈15) – fast CPU baseline |
+| dncnn (`--denoiser-type dncnn`) | **20.43** | **23.12** | **23.78** | Converted from the public σ=15 MATLAB checkpoint; strongest of the three in ADAM |
+| unet (`--denoiser-type unet`) | 20.37 | 20.93 | 21.33 | Fine-tuned via `scripts/train_unet_denoiser.py` (3 epochs, 50 DIV2K frames) |
 
-See `docs/baselines/adam_denoiser_baseline.md` for full RGB statistics, training details, and hyperparameters.
+The full RGB sweep (800 images) from `docs/baselines/adam_denoiser_baseline.md` still reports ~22–23 dB with the TinyDenoiser, but the table above illustrates how much room there is when swapping priors.
+
+Available priors:
+- **tiny** – the original 8-layer residual CNN (`scripts/train_tiny_denoiser.py`). Ships with the repo for CPU-friendly experiments.
+- **dncnn** – automatically downloads/converts the σ=15 model from the DnCNN project.
+- **unet** – shallow UNet tailored for our Poisson-Gaussian forward model; run `scripts/train_unet_denoiser.py --device cuda` (NVIDIA) or `--device dml` (AMD/DirectML) to regenerate weights.
+
+All denoiser choices share the same CLI; just pass `--denoiser-type` and optionally `--denoiser-weights` / `--denoiser-device` to override the defaults.
 
 
-## Baseline: ADMM + TinyDenoiser (Plug-and-Play)
+## Baseline: ADMM + Plug-and-Play Denoisers
 
-The ADMM variant solves the blur data term in closed form (FFT-domain normal equations) and reuses the TinyDenoiser as a plug-and-play proximal operator each iteration.
+ADMM solves the data term exactly in the frequency domain, then applies a proximal prior (denoiser) before updating the dual variable. Compared to ADAM, ADMM typically delivers higher PSNR and is the preferred path once you have a strong prior.
 
-CLI example (RGB batch):
-
+CLI example (RGB, UNet prior):
 ```bash
 python -m mtf_aware_deblurring.pipelines.reconstruct ^
   --div2k-root data ^
@@ -172,18 +185,19 @@ python -m mtf_aware_deblurring.pipelines.reconstruct ^
   --admm-iters 60 ^
   --admm-rho 0.4 ^
   --admm-denoiser-weight 1.0 ^
+  --denoiser-type unet ^
+  --denoiser-device cuda ^
   --collect-only
 ```
 
-`--admm-rho` tunes the augmented-Lagrangian penalty; larger values make the solution lean more on the denoiser. `--admm-denoiser-weight` blends between the raw ADMM iterate and denoiser prediction (1.0 = full denoiser). Use `--denoiser-type dncnn` or `--denoiser-type unet` to switch to the heavier priors when GPUs are available. A matching 5-image grayscale sweep produced:
-
+### Quick 5-image grayscale smoke test
 | Denoiser | Box | Random | Legendre | Notes |
 |----------|-----|--------|----------|-------|
-| tiny     | **24.09** | **25.24** | **25.78** | default Poisson-Gaussian tuned weights |
-| dncnn    | 22.36 | 23.29 | 23.72 | assumes additive Gaussian noise; still improves over tiny ADAM |
-| unet     | 24.10 | 25.17 | 25.74 | fine-tuned UNet prior |
+| tiny | **24.09** | **25.24** | **25.78** | Surprisingly strong despite its small size. Ships with repo. |
+| dncnn | 22.36 | 23.29 | 23.72 | Great for ADAM, but underperforms in ADMM because the Gaussian assumptions clash with the augmented Lagrangian step. |
+| unet | 24.10 | 25.17 | 25.74 | Matches the Tiny prior today; expect improvements once the UNet is trained longer on Poisson-Gaussian noise. |
 
-Results will be added to `docs/baselines/` alongside the other methods as we scale these experiments.
+The same denoiser flags (`--denoiser-type/--denoiser-weights/--denoiser-device`) apply here, so you can reuse the checkpoints produced by the training scripts listed below.
 
 ## Baseline: ADMM + Diffusion Prior (PnP-Diffusion)
 
@@ -206,19 +220,34 @@ python -m mtf_aware_deblurring.pipelines.reconstruct ^
   --collect-only
 ```
 
-### Training / Fine-Tuning Denoisers
+Training the score model:
+- Use `scripts/train_tiny_score_model.py --device cuda --max-images 200 --patches-per-image 64 --patch-size 96 --epochs 20` on an NVIDIA GPU (or `--device dml` for DirectML) to populate `src/mtf_aware_deblurring/assets/tiny_score_unet.pth`.
+- The script performs denoising score matching on grayscale DIV2K patches; feel free to swap in your dataset or noise schedule (`--sigma-min`, `--sigma-max`).
+- Pass the resulting checkpoint via `--diffusion-prior-weights` and optionally override `--diffusion-steps`, `--diffusion-guidance`, and `--diffusion-sigma-*` per experiment.
 
-- `scripts/train_tiny_denoiser.py`: reproduces the lightweight residual CNN used in the ADAM baseline (fast on CPU).
-- `scripts/train_unet_denoiser.py`: fine-tunes the new UNet denoiser on Poisson-Gaussian DIV2K patches; pass `--device cuda` to leverage AMD GPUs via ROCm/DirectML builds.
+### Quick 5-image grayscale smoke test (TinyScoreUNet, 8 steps)
+| Pattern | PSNR (dB) |
+|---------|-----------|
+| box     | 15.95 |
+| random  | 16.39 |
+| legendre| 16.46 |
 
-All denoiser scripts default to saving weights in `src/mtf_aware_deblurring/assets/`, and plug-and-play baselines pick them up automatically via `--denoiser-type` / `--denoiser-weights`.
+These numbers are lower than the denoiser-driven ADMM runs because the TinyScoreUNet above was trained for only a few epochs. Nevertheless, the infrastructure is in place: once you plug in a stronger score model (pretrained ADM, DiT, etc.), ADMM+diffusion becomes a drop-in option alongside the other baselines.
 
-Key flags:
-- `--diffusion-prior-type tiny_score` (default) selects the bundled TinyScoreUNet architecture.
-- `--diffusion-prior-weights` should point to a `.pth` file containing the score-model weights (matching your training procedure).
-- `--diffusion-steps`, `--diffusion-guidance`, `--diffusion-noise-scale`, and the sigma limits control the DPS-style schedule, letting you emulate the step counts used in recent papers.
+### Training / Fine-Tuning Denoisers & Score Models
 
-This baseline shares the FFT-domain `x`-updates with the denoiser-driven ADMM but swaps in the diffusion-based proximal operator, making it easy to plug in stronger priors as they become available.
+- `scripts/train_tiny_denoiser.py`: reproduces the lightweight residual CNN (σ≈15) used for the historical ADAM baseline. Works great on CPU.
+- `scripts/train_unet_denoiser.py`: trains the UNet prior on Poisson-Gaussian patches. Pass `--device cuda` on NVIDIA or `--device dml` on Windows/AMD (DirectML). Outputs `assets/unet_denoiser_sigma15.pth`.
+- `scripts/train_tiny_score_model.py`: denoising score matching for TinyScoreUNet. Use the same `--device` flag; the produced `tiny_score_unet.pth` feeds `--method admm_diffusion`.
+
+All scripts default to saving weights in `src/mtf_aware_deblurring/assets/`, and every plug-and-play baseline accepts `--denoiser-type/--denoiser-weights` (or `--diffusion-prior-weights`) so you can hot-swap your checkpoints without touching code.
+
+Key ADMM-diffusion flags:
+- `--diffusion-prior-type tiny_score` (default) selects the TinyScoreUNet adapter.
+- `--diffusion-prior-weights` points to the `.pth` generated above.
+- `--diffusion-steps`, `--diffusion-guidance`, `--diffusion-noise-scale`, and the sigma bounds control the DPS-style schedule, letting you emulate ADMM-Score/DPS hyper-parameters.
+
+The diffusion pipeline shares the same FFT-domain `x`-updates as the denoiser-driven ADMM variant—only the proximal operator changes—so stronger score models can be plugged in as soon as you train or import them.
 
 
 ---
@@ -233,7 +262,7 @@ This baseline shares the FFT-domain `x`-updates with the denoiser-driven ADMM bu
 - `src/mtf_aware_deblurring/forward_model_outputs/` - default artifact directories (`div2k/<id>/`, `reconstruction/<method>/`).
 - `src/mtf_aware_deblurring/{datasets,patterns,optics,noise,metrics,synthetic,utils}.py`  reusable building blocks.
 - `scripts/train_tiny_denoiser.py` - helper to regenerate the residual denoiser if you change the noise model.
-- `docs/`  proposal, summaries, and baseline reports (`docs/baselines/wiener_baseline.md` with qualitative crops and tables).
+- `docs/`  proposal, summaries, and baseline reports (`docs/baselines/wiener_baseline.md`, `docs/baselines/adam_denoiser_baseline.md`, `docs/baselines/admm_pnp_baseline.md`).
 
 ---
 

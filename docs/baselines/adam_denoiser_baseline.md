@@ -35,3 +35,23 @@ The ADAM+denoiser baseline consistently outperforms the damped Richardson–Lucy
 - The denoiser weight (0.38) and interval (3) strike a balance between detail recovery and runtime. Increasing the interval reduces compute but drops PSNR by >1 dB.
 - The bundled TinyDenoiser targets σ≈15/255. Regenerate weights with `scripts/train_tiny_denoiser.py` if you change the photon budget/noise model significantly.
 - Consider enabling `--save-recon` for qualitative crops—plug-and-play reconstructions have visibly fewer ringing artifacts than RL, especially for the legendre code.
+
+## Alternative Priors (`--denoiser-type`)
+
+With the recent refactor you can swap priors without changing code:
+
+| Name | Flag | Training Script | Comments |
+|------|------|-----------------|----------|
+| TinyDenoiser | `--denoiser-type tiny` (default) | `scripts/train_tiny_denoiser.py` | CPU-friendly, ships with repo. |
+| DnCNN σ=15 | `--denoiser-type dncnn` | *(auto-downloaded)* | We convert the public MATLAB weights to PyTorch on first use. |
+| UNet PnP | `--denoiser-type unet` | `scripts/train_unet_denoiser.py` | Tailored for Poisson-Gaussian noise; accepts `--device cuda` or `--device dml`. |
+
+On a small 5-image grayscale smoke test (DIV2K/X2, 128×128 crops) we observed:
+
+| Denoiser | Box | Random | Legendre |
+|----------|-----|--------|----------|
+| Tiny | 19.99 dB | 19.95 dB | 20.37 dB |
+| DnCNN | **20.43 dB** | **23.12 dB** | **23.78 dB** |
+| UNet | 20.37 dB | 20.93 dB | 21.33 dB |
+
+The full 800-image numbers in this report still refer to the Tiny prior, but DnCNN and UNet offer a clear upgrade path once you have GPU acceleration. Plug them in via `--denoiser-type` / `--denoiser-weights` and keep the rest of the CLI identical.
