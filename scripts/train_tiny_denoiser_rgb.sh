@@ -5,14 +5,15 @@
 #SBATCH --mem=32G
 #SBATCH --time=1-12:00:00
 #SBATCH --job-name=train-tiny-denoiser-rgb
-#SBATCH --output=%x-%j.out
+#SBATCH --output=logs/%x-%j.out
 
 set -euo pipefail
 
-# -------- configurable --------
-REPO="$HOME/mtf-aware-deblurring"
+# ---------- config ----------
+REPO="${REPO:-$HOME/mtf-aware-deblurring}"
 DATA_ROOT="${DATA_ROOT:-$HOME/datasets/DIV2K/DIV2K_train_LR_bicubic/X2}"
 CKPT_OUT="${CKPT_OUT:-$REPO/src/mtf_aware_deblurring/assets/tiny_denoiser_sigma15.pth}"
+
 EPOCHS="${EPOCHS:-20}"
 BATCH="${BATCH:-64}"
 LR="${LR:-1e-3}"
@@ -21,13 +22,13 @@ FEATS="${FEATS:-64}"
 PATCH="${PATCH:-64}"
 MAX_IMGS="${MAX_IMGS:-800}"
 PPI="${PPI:-60}"
-NOISE_SIGMA="${NOISE_SIGMA:-15}"  # pixel space (0-255)
+NOISE_SIGMA="${NOISE_SIGMA:-15}"   # pixel space (0-255)
 LOG_INT="${LOG_INT:-50}"
-# --------------------------------
+# ----------------------------
 
 VENV_DIR="/tmp/$USER/envs/CSC2529"
 PIP_CACHE="/tmp/$USER/pip-cache"
-mkdir -p "$PIP_CACHE" "$VENV_DIR" "$HOME/mtf-logs" "$(dirname "$CKPT_OUT")"
+mkdir -p "$PIP_CACHE" "$VENV_DIR" "$REPO/logs" "$(dirname "$CKPT_OUT")"
 
 if [ ! -x "$VENV_DIR/bin/python" ]; then
   python3 -m venv "$VENV_DIR"
@@ -38,6 +39,12 @@ export PIP_CACHE_DIR="$PIP_CACHE"
 cd "$REPO"
 python -m pip install --upgrade pip wheel
 pip install --no-cache-dir -e .
+
+echo "[CUDA]" && nvidia-smi || true
+python - <<'PY'
+import torch; print("torch.cuda.is_available:", torch.cuda.is_available())
+print("device:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu")
+PY
 
 python "$REPO/train_tiny_denoiser.py" \
   --div2k-root "$DATA_ROOT" \
