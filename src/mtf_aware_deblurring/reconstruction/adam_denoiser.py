@@ -6,7 +6,7 @@ from typing import Callable, Dict, Optional
 import numpy as np
 from numpy.fft import fft2, ifft2, ifftshift
 
-from ..denoisers import TinyDenoiserWrapper, build_tiny_denoiser
+from ..denoisers import build_denoiser
 from ..metrics import psnr
 from ..optics import pad_to_shape
 from .results import ReconstructionResult
@@ -48,9 +48,10 @@ def adam_denoiser_deconvolution(
     eps: float = 1e-8,
     denoiser_weight: float = 0.2,
     denoiser_interval: int = 2,
-    denoiser: Optional[TinyDenoiserWrapper] = None,
+    denoiser: Optional[Callable[[np.ndarray], np.ndarray]] = None,
     denoiser_weights: Optional[Path] = None,
     denoiser_device: Optional[str] = None,
+    denoiser_type: str = "tiny",
     callback: Optional[Callable[[int, float], None]] = None,
 ) -> np.ndarray:
     """
@@ -63,7 +64,11 @@ def adam_denoiser_deconvolution(
 
     m = np.zeros_like(x)
     v = np.zeros_like(x)
-    denoiser_obj = denoiser or build_tiny_denoiser(weights_path=denoiser_weights, device=denoiser_device)
+    denoiser_obj = denoiser or build_denoiser(
+        denoiser_type,
+        weights_path=denoiser_weights,
+        device=denoiser_device,
+    )
     denoiser_weight = float(np.clip(denoiser_weight, 0.0, 1.0))
     denoiser_interval = max(int(denoiser_interval), 1)
 
@@ -103,8 +108,13 @@ def run_adam_denoiser_baseline(
     denoiser_interval: int = 2,
     denoiser_weights: Optional[Path] = None,
     denoiser_device: Optional[str] = None,
+    denoiser_type: str = "tiny",
 ) -> Dict[str, ReconstructionResult]:
-    denoiser = build_tiny_denoiser(weights_path=denoiser_weights, device=denoiser_device)
+    denoiser = build_denoiser(
+        denoiser_type,
+        weights_path=denoiser_weights,
+        device=denoiser_device,
+    )
     outputs: Dict[str, ReconstructionResult] = {}
     for pattern, data in forward_results.items():
         recon = adam_denoiser_deconvolution(
@@ -117,6 +127,7 @@ def run_adam_denoiser_baseline(
             eps=eps,
             denoiser_weight=denoiser_weight,
             denoiser_interval=denoiser_interval,
+            denoiser_type=denoiser_type,
             denoiser=denoiser,
         )
         value = psnr(scene, recon)

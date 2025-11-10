@@ -5,19 +5,22 @@ from typing import Optional
 
 import numpy as np
 
-try:
+try:  # pragma: no cover - optional dependency path
     import torch
     from torch import nn
-except ImportError as exc:  # pragma: no cover
-    raise ImportError(
-        "TinyDenoiser requires PyTorch. Install torch>=2.0 to enable the ADAM+denoiser baseline."
-    ) from exc
+except ImportError:  # torch is optional unless denoiser baselines are used
+    torch = None
+    nn = None
+
+from ..torch_utils import resolve_device
 
 
-class TinyDenoiserNet(nn.Module):
+class TinyDenoiserNet(nn.Module if nn is not None else object):
     """Lightweight residual CNN denoiser trained on DIV2K patches."""
 
     def __init__(self, channels: int = 3, features: int = 64, depth: int = 8) -> None:
+        if nn is None:
+            raise ImportError("PyTorch is required to instantiate TinyDenoiserNet.")
         super().__init__()
         layers: list[nn.Module] = [
             nn.Conv2d(channels, features, kernel_size=3, padding=1),
@@ -31,7 +34,9 @@ class TinyDenoiserNet(nn.Module):
         layers.append(nn.Conv2d(features, channels, kernel_size=3, padding=1))
         self.body = nn.Sequential(*layers)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
+    def forward(self, x):  # type: ignore[override]
+        if torch is None:
+            raise ImportError("PyTorch is required to run the TinyDenoiser.")
         return torch.clamp(x - self.body(x), 0.0, 1.0)
 
 
@@ -39,14 +44,16 @@ class TinyDenoiserWrapper:
     """NumPy-friendly wrapper for the PyTorch denoiser."""
 
     def __init__(self, model: TinyDenoiserNet, *, device: Optional[str] = None) -> None:
-        if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.device = torch.device(device)
+        if torch is None:
+            raise ImportError("PyTorch is required to use TinyDenoiserWrapper.")
+        self.device = resolve_device(device)
         self.model = model.to(self.device)
         self.model.eval()
         self.noise_sigma: Optional[float] = None
 
     def __call__(self, image: np.ndarray) -> np.ndarray:
+        if torch is None:
+            raise ImportError("PyTorch is required to use TinyDenoiserWrapper.")
         arr = np.asarray(image, dtype=np.float32)
         squeeze_channel = False
         if arr.ndim == 2:
@@ -76,6 +83,8 @@ def build_tiny_denoiser(
     weights_path: Optional[Path] = None,
     device: Optional[str] = None,
 ) -> TinyDenoiserWrapper:
+    if torch is None:
+        raise ImportError("PyTorch is required to build the TinyDenoiser. Install torch>=2.0.")
     path = Path(weights_path) if weights_path is not None else default_denoiser_weights()
     if not path.exists():
         raise FileNotFoundError(

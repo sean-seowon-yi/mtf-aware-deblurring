@@ -3,4 +3,8 @@ matplotlib>=3.5
 imageio>=2.31
 pillow>=9.0
 ipython>=8.0
+scipy>=1.10
+h5py>=3.0
 torch>=2.2
+h5py>=3.0
+torch-directml; sys_platform == "win32"
