@@ -56,7 +56,7 @@ def parse_args(argv=None):
     parser.add_argument("--adam-denoiser-interval", type=int, default=2, help="Apply the denoiser every N ADAM steps.")
     parser.add_argument("--denoiser-weights", type=Path, help="Optional path to denoiser weights (.pth). Defaults to bundled weights.")
     parser.add_argument("--denoiser-device", choices=["cpu", "cuda", "dml"], help="Force denoiser device (defaults to auto).")
-    parser.add_argument("--denoiser-type", choices=["tiny", "dncnn", "unet"], default="tiny", help="Which denoiser backbone to use for ADAM/ADMM.")
+    parser.add_argument("--denoiser-type", choices=["tiny", "dncnn", "unet", "drunet_color", "drunet_gray"], default="tiny", help="Which denoiser backbone to use for ADAM/ADMM.")
     parser.add_argument("--admm-iters", type=int, default=60, help="ADMM iteration count.")
     parser.add_argument("--admm-rho", type=float, default=0.4, help="Augmented Lagrangian penalty parameter.")
     parser.add_argument("--admm-denoiser-weight", type=float, default=1.0, help="Blend weight applied to the denoiser output (0-1).")

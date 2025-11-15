@@ -11,6 +11,7 @@ from ..diffusion import DiffusionPrior, DiffusionPriorConfig, build_diffusion_pr
 from ..metrics import psnr
 from ..optics import pad_to_shape
 from .results import ReconstructionResult
+from ..denoisers.drunet_adapter import build_drunet_denoiser
 
 _DEFAULT_DIFFUSION_CONFIG = DiffusionPriorConfig()
 
@@ -96,11 +97,22 @@ def admm_denoiser_deconvolution(
     z = obs.copy()
     u = np.zeros_like(obs)
 
-    denoiser_obj = denoiser or build_denoiser(
-        denoiser_type,
-        weights_path=denoiser_weights,
-        device=denoiser_device,
-    )
+    if denoiser is not None:
+        denoiser_obj = denoiser
+    else:
+        if denoiser_type in ("drunet_color", "drunet_gray"):
+            mode = "color" if denoiser_type == "drunet_color" else "gray"
+            denoiser_obj = build_drunet_denoiser(
+                mode=mode,
+                device=denoiser_device or "cuda",
+                sigma=20.0,
+            )
+        else:
+            denoiser_obj = build_denoiser(
+                denoiser_type,
+                weights_path=denoiser_weights,
+                device=denoiser_device,
+            )
     denoiser_weight = float(np.clip(denoiser_weight, 0.0, 1.0))
 
     for t in range(1, iterations + 1):
@@ -208,7 +220,6 @@ def admm_diffusion_deconvolution(
 
     return x
 
-
 def run_admm_denoiser_baseline(
     scene: np.ndarray,
     forward_results: Dict[str, Dict[str, np.ndarray]],
@@ -220,11 +231,35 @@ def run_admm_denoiser_baseline(
     denoiser_device: Optional[str] = None,
     denoiser_type: str = "tiny",
 ) -> Dict[str, ReconstructionResult]:
-    denoiser = build_denoiser(
-        denoiser_type,
-        weights_path=denoiser_weights,
-        device=denoiser_device,
-    )
+
+    if denoiser_type in ("drunet_color", "drunet_gray"):
+        mode = "color" if denoiser_type == "drunet_color" else "gray"
+
+        # Example: exponential schedule from 25 → 8 over 'iterations'
+        def sigma_schedule(t: int, T: int) -> float:
+            if pattern == "legendre":
+                sigma_max, sigma_min = 40.0, 20.0
+            else:
+                sigma_max, sigma_min = 25.0, 8.0
+            if T <= 1:
+                return sigma_min
+            r = (sigma_min / sigma_max) ** (1.0 / max(T - 1, 1))
+            return sigma_max * (r ** (t - 1))
+
+        denoiser = build_drunet_denoiser(
+            mode=mode,
+            device=denoiser_device or "cuda",
+            sigma_init=25.0,
+            sigma_schedule=sigma_schedule,
+            iterations=iterations,
+        )
+    else:
+        denoiser = build_denoiser(
+            denoiser_type,
+            weights_path=denoiser_weights,
+            device=denoiser_device,
+        )
+
     outputs: Dict[str, ReconstructionResult] = {}
     for pattern, data in forward_results.items():
         recon = admm_denoiser_deconvolution(
