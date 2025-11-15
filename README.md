@@ -220,7 +220,7 @@ python -m mtf_aware_deblurring.pipelines.reconstruct \
   --adam-denoiser-weight 0.38 \
   --adam-denoiser-interval 3 \
   --denoiser-type dncnn \
-  --denoiser-device cuda \
+  --denoiser-device cpu \
   --collect-only
 ```
 
@@ -271,7 +271,7 @@ python -m mtf_aware_deblurring.pipelines.reconstruct \
   --admm-rho 0.4 \
   --admm-denoiser-weight 1.0 \
   --denoiser-type unet \
-  --denoiser-device cuda \
+  --denoiser-device cpu \
   --collect-only
 ```
 
