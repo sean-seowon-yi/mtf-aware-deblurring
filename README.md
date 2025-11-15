@@ -28,9 +28,19 @@ A research-grade toolkit for coded-exposure motion-blur simulation, physics-awar
 
 ## Installation & Environment
 
+### Windows
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+pip install -e .
+```
+
+### Linux / macOS
+```bash
+python -m venv .venv
+source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 pip install -e .
@@ -44,9 +54,9 @@ All outputs default to `src/mtf_aware_deblurring/forward_model_outputs/`; overri
 
 Every plug-and-play baseline accepts `--denoiser-device` (and, for diffusion, `--diffusion-device`) with one of:
 
-- `cpu` – portable runs with no GPU.
-- `cuda` – NVIDIA GPUs using the standard CUDA PyTorch wheels.
-- `dml` – Windows/DirectML backend for AMD GPUs (`pip install torch-directml -f https://aka.ms/torch-directml`), or ROCm wheels on Linux.
+- `cpu` — portable runs with no GPU.
+- `cuda` — NVIDIA GPUs using the standard CUDA PyTorch wheels.
+- `dml` — Windows/DirectML backend for AMD GPUs (`pip install torch-directml -f https://aka.ms/torch-directml`), or ROCm wheels on Linux.
 
 Tips:
 - Keep GPU-specific installs in their own conda/venv environments (e.g., `conda create -n amd python=3.10` then install `torch-directml` plus project deps).
@@ -63,6 +73,8 @@ python -m mtf_aware_deblurring.forward_pipeline
 ```
 
 ### DIV2K batch with RGB processing and auto-downloading
+
+#### Windows
 ```bash
 python -m mtf_aware_deblurring.forward_pipeline ^
   --div2k-root data ^
@@ -72,6 +84,18 @@ python -m mtf_aware_deblurring.forward_pipeline ^
   --auto-download ^
   --save-arrays --save-figures --save-pngs
 ```
+
+#### Linux / macOS
+```bash
+python -m mtf_aware_deblurring.forward_pipeline \
+  --div2k-root data \
+  --subset train --degradation bicubic --scale X2 \
+  --image-mode rgb \
+  --limit 10 \
+  --auto-download \
+  --save-arrays --save-figures --save-pngs
+```
+
 Outputs land beneath `forward_model_outputs/div2k/<image_id>/` (arrays, figures, PNGs per pattern).
 
 ### Programmatic usage
@@ -88,7 +112,7 @@ psf = results["patterns"]["legendre"]["psf"]
 
 ## Baseline: Wiener Deconvolution
 
-CLI (grayscale example):
+### Windows
 ```bash
 python -m mtf_aware_deblurring.pipelines.reconstruct ^
   --div2k-root data ^
@@ -97,6 +121,18 @@ python -m mtf_aware_deblurring.pipelines.reconstruct ^
   --limit 10 ^
   --auto-download ^
   --wiener-k 1e-3 ^
+  --save-recon
+```
+
+### Linux / macOS
+```bash
+python -m mtf_aware_deblurring.pipelines.reconstruct \
+  --div2k-root data \
+  --subset train --degradation bicubic --scale X2 \
+  --image-mode grayscale \
+  --limit 10 \
+  --auto-download \
+  --wiener-k 1e-3 \
   --save-recon
 ```
 
@@ -114,7 +150,7 @@ See the docs in `docs/baselines/` for setup details.
 
 ## Baseline: Richardson-Lucy
 
-CLI example (RGB, no recon dumps):
+### Windows
 ```bash
 python -m mtf_aware_deblurring.pipelines.reconstruct ^
   --div2k-root data ^
@@ -130,6 +166,24 @@ python -m mtf_aware_deblurring.pipelines.reconstruct ^
   --rl-smooth-sigma 1.5 ^
   --collect-only
 ```
+
+### Linux / macOS
+```bash
+python -m mtf_aware_deblurring.pipelines.reconstruct \
+  --div2k-root data \
+  --subset train --degradation bicubic --scale X2 \
+  --image-mode rgb \
+  --limit 10 \
+  --auto-download \
+  --method rl \
+  --rl-iterations 12 \
+  --rl-damping 0.7 \
+  --rl-tv-weight 1e-3 \
+  --rl-smooth-weight 0.4 \
+  --rl-smooth-sigma 1.5 \
+  --collect-only
+```
+
 Artifacts mirror the Wiener layout but live under `forward_model_outputs/reconstruction/rl/` with an `rl_psnr.csv` summary.
 
 Aggregated RGB results (800 images): Box 19.01 dB, Random 19.00 dB, Legendre 19.02 dB. Detailed setup in `docs/baselines/rl_baseline.md`.
@@ -138,7 +192,7 @@ Aggregated RGB results (800 images): Box 19.01 dB, Random 19.00 dB, Legendre 19.
 
 The ADAM solver treats the coded-exposure forward model as the data term and injects a denoiser every few iterations (PnP-ADAM). You can swap priors via `--denoiser-type` and control how aggressively they are blended with `--adam-denoiser-weight` / `--adam-denoiser-interval`.
 
-CLI example (RGB sweep, DNCCN prior):
+### Windows
 ```bash
 python -m mtf_aware_deblurring.pipelines.reconstruct ^
   --div2k-root data ^
@@ -154,19 +208,35 @@ python -m mtf_aware_deblurring.pipelines.reconstruct ^
   --collect-only
 ```
 
+### Linux / macOS
+```bash
+python -m mtf_aware_deblurring.pipelines.reconstruct \
+  --div2k-root data \
+  --subset train --degradation bicubic --scale X2 \
+  --image-mode rgb --limit 0 \
+  --method adam \
+  --adam-iters 30 \
+  --adam-lr 0.065 \
+  --adam-denoiser-weight 0.38 \
+  --adam-denoiser-interval 3 \
+  --denoiser-type dncnn \
+  --denoiser-device cuda \
+  --collect-only
+```
+
 ### Quick 5-image grayscale smoke test (DIV2K/X2, 128×128 crops)
 | Denoiser | Box | Random | Legendre | Notes |
 |----------|-----|--------|----------|-------|
-| tiny (`--denoiser-type tiny`) | 19.99 | 19.95 | 20.37 | Bundled residual CNN (σ≈15) – fast CPU baseline |
+| tiny (`--denoiser-type tiny`) | 19.99 | 19.95 | 20.37 | Bundled residual CNN (σ≈15) — fast CPU baseline |
 | dncnn (`--denoiser-type dncnn`) | **20.43** | **23.12** | **23.78** | Converted from the public σ=15 MATLAB checkpoint; strongest of the three in ADAM |
 | unet (`--denoiser-type unet`) | 20.37 | 20.93 | 21.33 | Fine-tuned via `scripts/train_unet_denoiser.py` (3 epochs, 50 DIV2K frames) |
 
 The full RGB sweep (800 images) from `docs/baselines/adam_denoiser_baseline.md` still reports ~22–23 dB with the TinyDenoiser, but the table above illustrates how much room there is when swapping priors.
 
 Available priors:
-- **tiny** – the original 8-layer residual CNN (`scripts/train_tiny_denoiser.py`). Ships with the repo for CPU-friendly experiments.
-- **dncnn** – automatically downloads/converts the σ=15 model from the DnCNN project.
-- **unet** – shallow UNet tailored for our Poisson-Gaussian forward model; run `scripts/train_unet_denoiser.py --device cuda` (NVIDIA) or `--device dml` (AMD/DirectML) to regenerate weights.
+- **tiny** — the original 8-layer residual CNN (`scripts/train_tiny_denoiser.py`). Ships with the repo for CPU-friendly experiments.
+- **dncnn** — automatically downloads/converts the σ=15 model from the DnCNN project.
+- **unet** — shallow UNet tailored for our Poisson-Gaussian forward model; run `scripts/train_unet_denoiser.py --device cuda` (NVIDIA) or `--device dml` (AMD/DirectML) to regenerate weights.
 
 All denoiser choices share the same CLI; just pass `--denoiser-type` and optionally `--denoiser-weights` / `--denoiser-device` to override the defaults.
 
@@ -175,7 +245,7 @@ All denoiser choices share the same CLI; just pass `--denoiser-type` and optiona
 
 ADMM solves the data term exactly in the frequency domain, then applies a proximal prior (denoiser) before updating the dual variable. Compared to ADAM, ADMM typically delivers higher PSNR and is the preferred path once you have a strong prior.
 
-CLI example (RGB, UNet prior):
+### Windows
 ```bash
 python -m mtf_aware_deblurring.pipelines.reconstruct ^
   --div2k-root data ^
@@ -187,6 +257,21 @@ python -m mtf_aware_deblurring.pipelines.reconstruct ^
   --admm-denoiser-weight 1.0 ^
   --denoiser-type unet ^
   --denoiser-device cuda ^
+  --collect-only
+```
+
+### Linux / macOS
+```bash
+python -m mtf_aware_deblurring.pipelines.reconstruct \
+  --div2k-root data \
+  --subset train --degradation bicubic --scale X2 \
+  --image-mode rgb --limit 0 \
+  --method admm \
+  --admm-iters 60 \
+  --admm-rho 0.4 \
+  --admm-denoiser-weight 1.0 \
+  --denoiser-type unet \
+  --denoiser-device cuda \
   --collect-only
 ```
 
@@ -203,8 +288,7 @@ The same denoiser flags (`--denoiser-type/--denoiser-weights/--denoiser-device`)
 
 Building on Diffusion Posterior Sampling (Chung et al., CVPR 2023) and ADMM-Score (Wang et al., NeurIPS 2023), we expose an ADMM variant whose proximal step is driven by a score-based diffusion prior. The lightweight `TinyScoreUNet` backbone lives in `mtf_aware_deblurring.diffusion` and can load any noise-prediction checkpoint you train (or adapt from existing DDPM/DDIM work).
 
-CLI example (RGB, DPS-style schedule):
-
+### Windows
 ```bash
 python -m mtf_aware_deblurring.pipelines.reconstruct ^
   --div2k-root data ^
@@ -217,6 +301,22 @@ python -m mtf_aware_deblurring.pipelines.reconstruct ^
   --diffusion-guidance 1.2 ^
   --diffusion-noise-scale 0.8 ^
   --diffusion-prior-weights path/to/tiny_score_checkpoint.pth ^
+  --collect-only
+```
+
+### Linux / macOS
+```bash
+python -m mtf_aware_deblurring.pipelines.reconstruct \
+  --div2k-root data \
+  --subset train --degradation bicubic --scale X2 \
+  --image-mode rgb --limit 0 \
+  --method admm_diffusion \
+  --admm-iters 40 \
+  --admm-rho 0.6 \
+  --diffusion-steps 16 \
+  --diffusion-guidance 1.2 \
+  --diffusion-noise-scale 0.8 \
+  --diffusion-prior-weights path/to/tiny_score_checkpoint.pth \
   --collect-only
 ```
 
@@ -254,24 +354,24 @@ The diffusion pipeline shares the same FFT-domain `x`-updates as the denoiser-dr
 
 ## Repository Layout (Highlights)
 
-- `src/mtf_aware_deblurring/forward_pipeline.py`  compatibility shim exposed via `python -m`.
+- `src/mtf_aware_deblurring/forward_pipeline.py` — compatibility shim exposed via `python -m`.
 - `src/mtf_aware_deblurring/pipelines/` - CLI entry points (`forward.py`, `reconstruct.py`) plus shared batch helpers.
 - `src/mtf_aware_deblurring/reconstruction/` - reusable reconstruction algorithms (Wiener, Richardson-Lucy, ADAM+TinyDenoiser).
 - `src/mtf_aware_deblurring/denoisers/` & `src/mtf_aware_deblurring/assets/` - TinyDenoiser architecture plus the pretrained weights used by the ADAM baseline.
 - `src/mtf_aware_deblurring/diffusion/` - TinyScoreUNet definition, sigma scheduling, and the ADMM diffusion prior adapter.
 - `src/mtf_aware_deblurring/forward_model_outputs/` - default artifact directories (`div2k/<id>/`, `reconstruction/<method>/`).
-- `src/mtf_aware_deblurring/{datasets,patterns,optics,noise,metrics,synthetic,utils}.py`  reusable building blocks.
+- `src/mtf_aware_deblurring/{datasets,patterns,optics,noise,metrics,synthetic,utils}.py` — reusable building blocks.
 - `scripts/train_tiny_denoiser.py` - helper to regenerate the residual denoiser if you change the noise model.
-- `docs/`  proposal, summaries, and baseline reports (`docs/baselines/wiener_baseline.md`, `docs/baselines/adam_denoiser_baseline.md`, `docs/baselines/admm_pnp_baseline.md`).
+- `docs/` — proposal, summaries, and baseline reports (`docs/baselines/wiener_baseline.md`, `docs/baselines/adam_denoiser_baseline.md`, `docs/baselines/admm_pnp_baseline.md`).
 
 ---
 
 ## Current Status & Next Steps
 
--  Refactored forward model into a reusable module with CLI.
--  DIV2K integration with auto-download and RGB support.
--  Baseline coverage: Wiener, Richardson-Lucy, ADAM+TinyDenoiser, ADMM+TinyDenoiser, and the new ADMM+Diffusion prior (score-based) hooks.
--  Upcoming work:
+- ✓ Refactored forward model into a reusable module with CLI.
+- ✓ DIV2K integration with auto-download and RGB support.
+- ✓ Baseline coverage: Wiener, Richardson-Lucy, ADAM+TinyDenoiser, ADMM+TinyDenoiser, and the new ADMM+Diffusion prior (score-based) hooks.
+- ⚙ Upcoming work:
   - Physics-aware PnP scheduling experiments (MTF-weighted denoiser schedules).
   - Extended ablations: photon budget sweeps, exposure code families, schedule variants.
   - Additional metrics (SSIM, LPIPS) and experiment logging in `docs/experiments/`.
