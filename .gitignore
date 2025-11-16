@@ -20,3 +20,4 @@ src/mtf_aware_deblurring/forward_model_outputs/
 data/
 .vs
 .venv
+outputs

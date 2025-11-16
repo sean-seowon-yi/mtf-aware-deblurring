@@ -91,28 +91,23 @@ def admm_denoiser_deconvolution(
     denom = np.abs(otf) ** 2 + float(rho)
     if obs.ndim == 3:
         denom = denom[..., None]
+        otf_conj = otf_conj[..., None]
 
     Y_fft = _fft2_image(obs)
     x = obs.copy()
     z = obs.copy()
     u = np.zeros_like(obs)
 
-    if denoiser is not None:
-        denoiser_obj = denoiser
+    if denoiser is None:
+        denoiser_obj = build_denoiser(
+            denoiser_type,
+            weights_path=denoiser_weights,
+            device=denoiser_device,
+        )
     else:
-        if denoiser_type in ("drunet_color", "drunet_gray"):
-            mode = "color" if denoiser_type == "drunet_color" else "gray"
-            denoiser_obj = build_drunet_denoiser(
-                mode=mode,
-                device=denoiser_device or "cuda",
-                sigma=20.0,
-            )
-        else:
-            denoiser_obj = build_denoiser(
-                denoiser_type,
-                weights_path=denoiser_weights,
-                device=denoiser_device,
-            )
+        denoiser_obj = denoiser
+    if hasattr(denoiser_obj, "reset"):
+        denoiser_obj.reset()
     denoiser_weight = float(np.clip(denoiser_weight, 0.0, 1.0))
 
     for t in range(1, iterations + 1):
@@ -232,12 +227,17 @@ def run_admm_denoiser_baseline(
     denoiser_type: str = "tiny",
 ) -> Dict[str, ReconstructionResult]:
 
-    if denoiser_type in ("drunet_color", "drunet_gray"):
-        mode = "color" if denoiser_type == "drunet_color" else "gray"
+    denoiser: Callable[[np.ndarray], np.ndarray]
+    is_drunet = denoiser_type in ("drunet_color", "drunet_gray")
 
-        # Example: exponential schedule from 25 → 8 over 'iterations'
+    if is_drunet:
+        mode = "color" if denoiser_type == "drunet_color" else "gray"
+        active_pattern = {"name": None}
+
+        # Example: exponential schedule from 25 -> 8 over 'iterations'
         def sigma_schedule(t: int, T: int) -> float:
-            if pattern == "legendre":
+            pattern_name = active_pattern["name"]
+            if pattern_name == "legendre":
                 sigma_max, sigma_min = 40.0, 20.0
             else:
                 sigma_max, sigma_min = 25.0, 8.0
@@ -262,6 +262,8 @@ def run_admm_denoiser_baseline(
 
     outputs: Dict[str, ReconstructionResult] = {}
     for pattern, data in forward_results.items():
+        if is_drunet:
+            active_pattern["name"] = pattern
         recon = admm_denoiser_deconvolution(
             data["noisy"],
             data["kernel"],

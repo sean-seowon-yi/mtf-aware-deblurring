@@ -10,7 +10,6 @@ from ..denoisers import build_denoiser
 from ..metrics import psnr
 from ..optics import pad_to_shape
 from .results import ReconstructionResult
-from ..denoisers.drunet_adapter import build_drunet_denoiser
 
 
 def _normalize_kernel(kernel: np.ndarray) -> np.ndarray:
@@ -65,22 +64,16 @@ def adam_denoiser_deconvolution(
 
     m = np.zeros_like(x)
     v = np.zeros_like(x)
-    if denoiser is not None:
-        denoiser_obj = denoiser
+    if denoiser is None:
+        denoiser_obj = build_denoiser(
+            denoiser_type,
+            weights_path=denoiser_weights,
+            device=denoiser_device,
+        )
     else:
-        if denoiser_type in ("drunet_color", "drunet_gray"):
-            mode = "color" if denoiser_type == "drunet_color" else "gray"
-            denoiser_obj = build_drunet_denoiser(
-                mode=mode,
-                device=denoiser_device or "cuda",
-                sigma=20.0,  # or expose as argument if you like
-            )
-        else:
-            denoiser_obj = build_denoiser(
-                denoiser_type,
-                weights_path=denoiser_weights,
-                device=denoiser_device,
-            )
+        denoiser_obj = denoiser
+    if hasattr(denoiser_obj, "reset"):
+        denoiser_obj.reset()
     denoiser_weight = float(np.clip(denoiser_weight, 0.0, 1.0))
     denoiser_interval = max(int(denoiser_interval), 1)
 

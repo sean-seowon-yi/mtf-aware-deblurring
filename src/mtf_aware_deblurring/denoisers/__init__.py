@@ -69,7 +69,7 @@ def build_denoiser(
         return build_drunet_denoiser(
             mode=mode,
             device=device or "cuda",  # default to CUDA if available
-            sigma=25.0,               # you can expose this later if you want
+            sigma_init=25.0,          # you can expose this later if you want
         )
 
     raise ValueError(

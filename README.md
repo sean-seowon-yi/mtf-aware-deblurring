@@ -17,7 +17,7 @@ A research-grade toolkit for coded-exposure motion-blur simulation, physics-awar
 - **Baselines**:
   - Reusable Wiener + Richardson-Lucy algorithms live under `reconstruction/`.
   - `pipelines/reconstruct.py` orchestrates ADAM, ADMM (denoiser and diffusion variants), and shared batching/CSV/reporting.
-  - Plug-and-play solvers support multiple priors: the bundled TinyDenoiser, a converted DnCNN σ=15 model, a UNet denoiser trained via `scripts/train_unet_denoiser.py`, and a TinyScoreUNet diffusion prior (see the baseline section below).
+  - Plug-and-play solvers support multiple priors: the bundled TinyDenoiser, a converted DnCNN sigma=15 model, a UNet denoiser trained via scripts/train_unet_denoiser.py, pretrained DRUNet color/gray backbones sourced from DPIR, and a TinyScoreUNet diffusion prior (see the baseline section below).
 - **Device-aware training/runtime**:
   - `torch_utils.resolve_device` lets every CLI flag accept `cpu`, `cuda`, or `dml` (DirectML) so you can target NVIDIA GPUs, AMD GPUs, or CPU-only runs without code changes.
   - Training scripts (`scripts/train_*`) detect the same device flag, making it straightforward to fine-tune priors on NVIDIA (CUDA) or AMD (DirectML/ROCm) hardware.
@@ -234,9 +234,10 @@ python -m mtf_aware_deblurring.pipelines.reconstruct \
 The full RGB sweep (800 images) from `docs/baselines/adam_denoiser_baseline.md` still reports ~22–23 dB with the TinyDenoiser, but the table above illustrates how much room there is when swapping priors.
 
 Available priors:
-- **tiny** — the original 8-layer residual CNN (`scripts/train_tiny_denoiser.py`). Ships with the repo for CPU-friendly experiments.
-- **dncnn** — automatically downloads/converts the σ=15 model from the DnCNN project.
-- **unet** — shallow UNet tailored for our Poisson-Gaussian forward model; run `scripts/train_unet_denoiser.py --device cuda` (NVIDIA) or `--device dml` (AMD/DirectML) to regenerate weights.
+- **tiny** - the original 8-layer residual CNN (`scripts/train_tiny_denoiser.py`). Ships with the repo for CPU-friendly experiments.
+- **dncnn** - automatically downloads/converts the sigma=15 model from the DnCNN project.
+- **unet** - shallow UNet tailored for our Poisson-Gaussian forward model; run `scripts/train_unet_denoiser.py --device cuda` (NVIDIA) or pass `--device dml` for AMD/DirectML to regenerate weights.
+- **drunet_color / drunet_gray** - DPIR pretrained DRUNet checkpoints auto-downloaded from the `deepinv/drunet` Hugging Face repo. Use `--denoiser-type drunet_color` for RGB or `--denoiser-type drunet_gray` for grayscale; weights are cached under `~/.cache/mtf_aware_deblurring/drunet/`.
 
 All denoiser choices share the same CLI; just pass `--denoiser-type` and optionally `--denoiser-weights` / `--denoiser-device` to override the defaults.
 
@@ -255,7 +256,7 @@ python -m mtf_aware_deblurring.pipelines.reconstruct ^
   --admm-iters 60 ^
   --admm-rho 0.4 ^
   --admm-denoiser-weight 1.0 ^
-  --denoiser-type unet ^
+  --denoiser-type drunet_color ^
   --denoiser-device cuda ^
   --collect-only
 ```
@@ -270,10 +271,13 @@ python -m mtf_aware_deblurring.pipelines.reconstruct \
   --admm-iters 60 \
   --admm-rho 0.4 \
   --admm-denoiser-weight 1.0 \
-  --denoiser-type unet \
+  --denoiser-type drunet_color \
   --denoiser-device cpu \
   --collect-only
 ```
+> **DRUNet note:** --denoiser-type drunet_color targets RGB scenes while --denoiser-type drunet_gray handles grayscale inputs. The pretrained weights download once to ~/.cache/mtf_aware_deblurring/drunet/ and are reused on subsequent runs.
+
+
 
 ### Quick 5-image grayscale smoke test
 | Denoiser | Box | Random | Legendre | Notes |

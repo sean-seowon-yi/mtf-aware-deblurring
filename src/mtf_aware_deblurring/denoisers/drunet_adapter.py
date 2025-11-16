@@ -1,5 +1,7 @@
 # mtf_aware_deblurring/denoisers/drunet_adapter.py
 
+from typing import Callable, Optional
+
 import numpy as np
 import torch
 
@@ -11,7 +13,7 @@ def build_drunet_denoiser(
     mode: str = "color",
     device: str = "cuda",
     sigma_init: float = 15.0,
-    sigma_schedule=None,      # Optional: (t, T) -> sigma_t
+    sigma_schedule: Optional[Callable[[int, int], float]] = None,
     iterations: int | None = None,
 ):
     """
@@ -42,9 +44,12 @@ def build_drunet_denoiser(
 
     model.eval()
 
-    # keep track of how many times we’ve called the denoiser
+    # keep track of how many times we've called the denoiser
     state = {"t": 0}
     T = iterations
+
+    def reset_state() -> None:
+        state["t"] = 0
 
     def denoise_np(x_np: np.ndarray) -> np.ndarray:
         state["t"] += 1
@@ -88,4 +93,5 @@ def build_drunet_denoiser(
 
         return np.clip(y_np, 0.0, 1.0).astype(np.float32)
 
+    denoise_np.reset = reset_state  # type: ignore[attr-defined]
     return denoise_np
