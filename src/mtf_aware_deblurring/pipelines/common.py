@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Dict, Iterator, Optional, Sequence
@@ -8,6 +8,7 @@ from typing import Dict, Iterator, Optional, Sequence
 import numpy as np
 
 from ..datasets import DIV2KDataset
+from ..reconstruction.prior_scheduler import PhysicsContext
 from .forward import ensure_div2k_available, run_forward_model
 from ..utils import default_output_dir
 
@@ -22,6 +23,7 @@ class ForwardBatch:
     forward_outputs: Dict[str, object]
     output_dir: Optional[Path]
     baseline_root: Path
+    pattern_contexts: Dict[str, PhysicsContext] = field(default_factory=dict)
 
 
 def _resolve_limit(value: Optional[int]) -> Optional[int]:
@@ -100,6 +102,15 @@ def run_forward_batches(
             verbose=False,
         )
 
+        contexts: Dict[str, PhysicsContext] = {}
+        patterns_dict = forward_outputs.get("patterns", {})  # type: ignore[assignment]
+        if isinstance(patterns_dict, dict):
+            for name, data in patterns_dict.items():
+                if isinstance(data, dict):
+                    ctx = data.get("context")
+                    if isinstance(ctx, PhysicsContext):
+                        contexts[name] = ctx
+
         yield ForwardBatch(
             index=idx,
             image_path=path,
@@ -107,6 +118,7 @@ def run_forward_batches(
             forward_outputs=forward_outputs,
             output_dir=output_dir,
             baseline_root=baseline_root,
+            pattern_contexts=contexts,
         )
 
 

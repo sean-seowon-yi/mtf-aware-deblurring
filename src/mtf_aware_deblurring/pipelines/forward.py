@@ -15,6 +15,7 @@ from ..metrics import spectral_snr
 from ..noise import add_poisson_gaussian
 from ..optics import fft_convolve2d, kernel2d_from_psf1d, motion_psf_from_code, mtf_from_kernel
 from ..patterns import make_exposure_code, resolve_legendre_prime
+from ..reconstruction.prior_scheduler import PhysicsContext
 from ..synthetic import SyntheticData
 from ..utils import axes_as_list, configure_matplotlib_defaults, default_output_dir, finalize_figure
 
@@ -202,6 +203,34 @@ class ForwardModelRunner:
 
         self._print_pattern_summary(label, code, current_legendre_params)
 
+        context = PhysicsContext(
+            pattern=pattern,
+            taps=self.T,
+            blur_length_px=self.blur_length_px,
+            duty_cycle=float(code.mean()),
+            photon_budget=self.photon_budget,
+            read_noise_sigma=self.read_noise_sigma,
+            random_seed=self.random_seed + idx,
+            code=code,
+            psf=psf,
+            kernel=kernel,
+            mtf=mtf,
+            ssnr=ssnr,
+            scene_stats={
+                "mean": float(self.scene.mean()),
+                "variance": float(self.scene.var()),
+            },
+            blurred_stats={
+                "mean": float(blurred.mean()),
+                "variance": float(blurred.var()),
+            },
+            noisy_stats={
+                "mean": float(noisy.mean()),
+                "variance": float(noisy.var()),
+            },
+            metadata=metadata,
+        )
+
         return {
             "label": label,
             "code": code,
@@ -213,6 +242,7 @@ class ForwardModelRunner:
             "ssnr": ssnr,
             "duty_cycle": float(code.mean()),
             "metadata": metadata,
+            "context": context,
         }
 
     def _make_code(

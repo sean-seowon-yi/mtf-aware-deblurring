@@ -15,6 +15,7 @@ from ..reconstruction import (
     run_adam_denoiser_baseline,
     run_admm_denoiser_baseline,
     run_admm_diffusion_baseline,
+    HeuristicPhysicsAwareScheduler,
 )
 
 
@@ -60,6 +61,9 @@ def parse_args(argv=None):
     parser.add_argument("--admm-iters", type=int, default=60, help="ADMM iteration count.")
     parser.add_argument("--admm-rho", type=float, default=0.4, help="Augmented Lagrangian penalty parameter.")
     parser.add_argument("--admm-denoiser-weight", type=float, default=1.0, help="Blend weight applied to the denoiser output (0-1).")
+    parser.add_argument("--admm-mtf-scale", type=float, default=0.0, help="Exponent applied to the MTF trust mask (set 0 to disable).")
+    parser.add_argument("--admm-mtf-floor", type=float, default=0.0, help="Minimum value for the MTF trust mask (set 0 to disable).")
+    parser.add_argument("--use-physics-scheduler", action="store_true", help="Enable the heuristic physics-aware prior scheduler for ADMM.")
     parser.add_argument("--diffusion-prior-type", choices=["tiny_score"], default="tiny_score", help="Score model backbone for the diffusion prior.")
     parser.add_argument("--diffusion-prior-weights", type=Path, help="Path to diffusion score-model weights (.pth).")
     parser.add_argument("--diffusion-steps", type=int, default=12, help="Diffusion-score steps per ADMM iteration.")
@@ -112,6 +116,11 @@ def run_method(method: str, batch, args):
             denoiser_type=args.denoiser_type,
         )
     if method == "admm":
+        scheduler = None
+        if getattr(args, "use_physics_scheduler", False):
+            scheduler = HeuristicPhysicsAwareScheduler(
+                total_iterations=args.admm_iters,
+            )
         return run_admm_denoiser_baseline(
             batch.image,
             batch.forward_outputs["patterns"],  # type: ignore[index]
@@ -121,6 +130,10 @@ def run_method(method: str, batch, args):
             denoiser_weights=args.denoiser_weights,
             denoiser_device=args.denoiser_device,
             denoiser_type=args.denoiser_type,
+            scheduler=scheduler,
+            pattern_contexts=batch.pattern_contexts,
+            mtf_scale=args.admm_mtf_scale,
+            mtf_floor=args.admm_mtf_floor,
         )
     if method == "admm_diffusion":
         return run_admm_diffusion_baseline(

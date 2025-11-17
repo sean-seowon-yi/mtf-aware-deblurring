@@ -8,6 +8,12 @@ from .admm_denoiser import (
     admm_diffusion_deconvolution,
     run_admm_diffusion_baseline,
 )
+from .prior_scheduler import (
+    PhysicsContext,
+    PhysicsAwareScheduler,
+    HeuristicPhysicsAwareScheduler,
+    SchedulerDecision,
+)
 
 WienerResult = ReconstructionResult
 
@@ -24,4 +30,8 @@ __all__ = [
     "run_admm_denoiser_baseline",
     "admm_diffusion_deconvolution",
     "run_admm_diffusion_baseline",
+    "PhysicsContext",
+    "PhysicsAwareScheduler",
+    "HeuristicPhysicsAwareScheduler",
+    "SchedulerDecision",
 ]

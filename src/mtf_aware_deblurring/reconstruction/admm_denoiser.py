@@ -12,6 +12,7 @@ from ..metrics import psnr
 from ..optics import pad_to_shape
 from .results import ReconstructionResult
 from ..denoisers.drunet_adapter import build_drunet_denoiser
+from .prior_scheduler import PhysicsAwareScheduler, PhysicsContext
 
 _DEFAULT_DIFFUSION_CONFIG = DiffusionPriorConfig()
 
@@ -48,6 +49,23 @@ def _apply_otf(image: np.ndarray, otf: np.ndarray) -> np.ndarray:
     return np.real(ifft2(prod, axes=(0, 1)))
 
 
+def _normalize_mtf(mtf: np.ndarray) -> np.ndarray:
+    mtf = np.asarray(mtf, dtype=np.float32)
+    max_val = float(mtf.max())
+    if max_val > 0:
+        mtf = mtf / max_val
+    return np.clip(mtf, 0.0, 1.0)
+
+
+def _build_trust_mask(mtf: np.ndarray, pattern: str, scale: float, floor: float) -> np.ndarray:
+    if scale <= 0 or floor <= 0:
+        return None  # type: ignore[return-value]
+    mtf_norm = _normalize_mtf(mtf)
+    gamma = max(scale, 0.1)
+    mask = np.clip(mtf_norm**gamma, floor, 1.0)
+    return mask.astype(np.float32)
+
+
 def _x_update(
     z: np.ndarray,
     u: np.ndarray,
@@ -75,6 +93,12 @@ def admm_denoiser_deconvolution(
     denoiser_device: Optional[str] = None,
     denoiser_type: str = "tiny",
     callback: Optional[Callable[[int, float], None]] = None,
+    scheduler: Optional[PhysicsAwareScheduler] = None,
+    pattern_name: Optional[str] = None,
+    mtf_weights: Optional[np.ndarray] = None,
+    mtf_scale: float = 1.5,
+    mtf_floor: float = 0.2,
+    sigma_scale: Optional[float] = None,
 ) -> np.ndarray:
     """
     Plug-and-play ADMM solver that alternates between frequency-domain deblurring and
@@ -88,10 +112,22 @@ def admm_denoiser_deconvolution(
     obs = np.asarray(observation, dtype=np.float32)
     kernel_norm = _normalize_kernel(kernel)
     otf, otf_conj = _prepare_otf(kernel_norm, obs.shape[:2])
-    denom = np.abs(otf) ** 2 + float(rho)
+    otf_abs2 = np.abs(otf) ** 2
+    weight_map: Optional[np.ndarray] = None
+    if mtf_weights is not None:
+        w = np.asarray(mtf_weights, dtype=np.float32)
+        max_val = float(w.max())
+        if max_val > 0:
+            w = w / max_val
+        w = np.clip(w ** float(mtf_scale), float(mtf_floor), 1.0)
+        weight_map = w
+    denom = otf_abs2 + float(rho)
     if obs.ndim == 3:
         denom = denom[..., None]
         otf_conj = otf_conj[..., None]
+        otf_abs2 = otf_abs2[..., None]
+        if weight_map is not None:
+            weight_map = weight_map[..., None]
 
     Y_fft = _fft2_image(obs)
     x = obs.copy()
@@ -110,13 +146,41 @@ def admm_denoiser_deconvolution(
         denoiser_obj.reset()
     denoiser_weight = float(np.clip(denoiser_weight, 0.0, 1.0))
 
+    scheduler_active = scheduler is not None and pattern_name is not None
+
     for t in range(1, iterations + 1):
-        x = _x_update(z, u, otf_conj=otf_conj, denom=denom, Y_fft=Y_fft, rho=rho)
+        current_weight = denoiser_weight
+        current_rho = rho
+        current_sigma_scale = sigma_scale
+        if scheduler_active and scheduler is not None:
+            decision = scheduler.plan_iteration(pattern_name, t)
+            current_weight = float(np.clip(decision.denoiser_weight, 0.0, 1.0))
+            current_rho = float(max(decision.rho, 1e-6))
+            if decision.sigma_scale is not None:
+                current_sigma_scale = decision.sigma_scale
+
+        if weight_map is not None:
+            weighted_abs2 = otf_abs2 * weight_map
+            weighted_conj = otf_conj * weight_map
+        else:
+            weighted_abs2 = otf_abs2
+            weighted_conj = otf_conj
+
+        denom = weighted_abs2 + current_rho
+        z_minus_u_fft = _fft2_image(z - u)
+        numerator = (weighted_conj * Y_fft) + current_rho * z_minus_u_fft
+        X_fft = numerator / denom
+        x = np.clip(_ifft2_image(X_fft), 0.0, 1.0)
 
         v = x + u
-        if denoiser_weight > 0.0:
+        if current_weight > 0.0:
             denoised = denoiser_obj(v)
-            z = np.clip((1.0 - denoiser_weight) * v + denoiser_weight * denoised, 0.0, 1.0)
+            if current_sigma_scale is not None and hasattr(denoiser_obj, "sigma_scale"):
+                try:
+                    denoiser_obj.sigma_scale = float(current_sigma_scale)
+                except Exception:
+                    pass
+            z = np.clip((1.0 - current_weight) * v + current_weight * denoised, 0.0, 1.0)
         else:
             z = np.clip(v, 0.0, 1.0)
 
@@ -225,6 +289,10 @@ def run_admm_denoiser_baseline(
     denoiser_weights: Optional[Path] = None,
     denoiser_device: Optional[str] = None,
     denoiser_type: str = "tiny",
+    scheduler: Optional[PhysicsAwareScheduler] = None,
+    pattern_contexts: Optional[Dict[str, PhysicsContext]] = None,
+    mtf_scale: float = 1.5,
+    mtf_floor: float = 0.2,
 ) -> Dict[str, ReconstructionResult]:
 
     denoiser: Callable[[np.ndarray], np.ndarray]
@@ -234,7 +302,7 @@ def run_admm_denoiser_baseline(
         mode = "color" if denoiser_type == "drunet_color" else "gray"
         active_pattern = {"name": None}
 
-        # Example: exponential schedule from 25 -> 8 over 'iterations'
+        # Exponential schedule; modulated by the physics-aware scheduler if available.
         def sigma_schedule(t: int, T: int) -> float:
             pattern_name = active_pattern["name"]
             if pattern_name == "legendre":
@@ -242,9 +310,16 @@ def run_admm_denoiser_baseline(
             else:
                 sigma_max, sigma_min = 25.0, 8.0
             if T <= 1:
-                return sigma_min
-            r = (sigma_min / sigma_max) ** (1.0 / max(T - 1, 1))
-            return sigma_max * (r ** (t - 1))
+                base_sigma = sigma_min
+            else:
+                r = (sigma_min / sigma_max) ** (1.0 / max(T - 1, 1))
+                base_sigma = sigma_max * (r ** (t - 1))
+
+            if scheduler is not None and pattern_name is not None:
+                decision = scheduler.plan_iteration(pattern_name, t)
+                if decision.sigma_scale is not None:
+                    base_sigma = float(np.clip(base_sigma * decision.sigma_scale, sigma_min, sigma_max * 1.5))
+            return base_sigma
 
         denoiser = build_drunet_denoiser(
             mode=mode,
@@ -260,10 +335,26 @@ def run_admm_denoiser_baseline(
             device=denoiser_device,
         )
 
+    if scheduler is not None:
+        scheduler_contexts = pattern_contexts or {}
+        scheduler.set_contexts(scheduler_contexts)
+
     outputs: Dict[str, ReconstructionResult] = {}
     for pattern, data in forward_results.items():
         if is_drunet:
             active_pattern["name"] = pattern
+        if scheduler is not None:
+            scheduler.reset()
+        ctx = None
+        if pattern_contexts is not None:
+            ctx = pattern_contexts.get(pattern)
+        mtf_weights = None
+        if ctx is not None:
+            mtf_weights = _build_trust_mask(ctx.mtf, pattern, scale=mtf_scale, floor=mtf_floor)
+        sigma_scale = None
+        if scheduler is not None:
+            # sigma scaling will be provided per iteration; initialize hints
+            sigma_scale = 1.0
         recon = admm_denoiser_deconvolution(
             data["noisy"],
             data["kernel"],
@@ -272,6 +363,12 @@ def run_admm_denoiser_baseline(
             denoiser_weight=denoiser_weight,
             denoiser_type=denoiser_type,
             denoiser=denoiser,
+            scheduler=scheduler,
+            pattern_name=pattern,
+            mtf_weights=mtf_weights,
+            mtf_scale=mtf_scale,
+            mtf_floor=mtf_floor,
+            sigma_scale=sigma_scale,
         )
         value = psnr(scene, recon)
         outputs[pattern] = ReconstructionResult(reconstruction=recon, psnr=value)

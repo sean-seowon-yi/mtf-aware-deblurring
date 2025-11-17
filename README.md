@@ -279,6 +279,15 @@ python -m mtf_aware_deblurring.pipelines.reconstruct \
 
 
 
+### Physics-aware ADMM (optional)
+- Enable with `--use-physics-scheduler` to adjust `rho` and the denoiser blend each ADMM iteration using per-pattern MTF/SSNR context. Omit the flag for vanilla ADMM.
+- MTF trust mask: `--admm-mtf-scale` (exponent) and `--admm-mtf-floor` (minimum) control the mask; defaults are 0 (disabled). Set, for example, `--admm-mtf-scale 1.5 --admm-mtf-floor 0.2` to down-weight unrecoverable bands.
+- Denoisers:
+  - `dncnn`/`tiny`/`unet`: scheduler tweaks `rho` and blend; sigma is fixed.
+  - `drunet_color/drunet_gray`: scheduler also modulates DRUNet’s noise-level schedule; prefer `--denoiser-device cuda`.
+- Example (grayscale DIV2K/X2, 256×256 crops): `--method admm --admm-iters 25 --admm-rho 0.45 --admm-denoiser-weight 1.0 --denoiser-type dncnn --use-physics-scheduler` yields ~26 dB on legendre when the mask is enabled.
+- For stock DRUNet baselines, turn the scheduler off and set `--admm-mtf-scale 0 --admm-mtf-floor 0`; choose `--denoiser-type drunet_color` (RGB) or `drunet_gray` (grayscale).
+
 ### Quick 5-image grayscale smoke test
 | Denoiser | Box | Random | Legendre | Notes |
 |----------|-----|--------|----------|-------|
