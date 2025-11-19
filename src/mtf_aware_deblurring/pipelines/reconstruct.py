@@ -41,7 +41,12 @@ def parse_args(argv=None):
     parser.add_argument("--save-pngs", action="store_true", help="Save forward-model PNGs.")
     parser.add_argument("--save-recon", action="store_true", help="Save reconstructions as PNGs.")
     parser.add_argument("--output-dir", type=Path, help="Base directory for outputs.")
-    parser.add_argument("--method", choices=["wiener", "rl", "adam", "admm", "admm_diffusion"], default="wiener", help="Reconstruction method to run.")
+    parser.add_argument(
+        "--method",
+        choices=["wiener", "rl", "adam", "admm", "admm_diffusion"],
+        default="wiener",
+        help="Reconstruction method to run.",
+    )
     parser.add_argument("--wiener-k", type=float, default=1e-3, help="Wiener filter constant k.")
     parser.add_argument("--rl-iterations", type=int, default=30, help="Richardson-Lucy iteration count.")
     parser.add_argument("--rl-damping", type=float, default=1.0, help="Richardson-Lucy damping exponent.")
@@ -56,20 +61,43 @@ def parse_args(argv=None):
     parser.add_argument("--adam-denoiser-interval", type=int, default=2, help="Apply the denoiser every N ADAM steps.")
     parser.add_argument("--denoiser-weights", type=Path, help="Optional path to denoiser weights (.pth). Defaults to bundled weights.")
     parser.add_argument("--denoiser-device", choices=["cpu", "cuda", "dml"], help="Force denoiser device (defaults to auto).")
-    parser.add_argument("--denoiser-type", choices=["tiny", "dncnn", "unet", "drunet_color", "drunet_gray"], default="tiny", help="Which denoiser backbone to use for ADAM/ADMM.")
+    parser.add_argument(
+        "--denoiser-type",
+        choices=["tiny", "dncnn", "unet", "drunet_color", "drunet_gray"],
+        default="tiny",
+        help="Which denoiser backbone to use for ADAM/ADMM.",
+    )
     parser.add_argument("--admm-iters", type=int, default=60, help="ADMM iteration count.")
     parser.add_argument("--admm-rho", type=float, default=0.4, help="Augmented Lagrangian penalty parameter.")
     parser.add_argument("--admm-denoiser-weight", type=float, default=1.0, help="Blend weight applied to the denoiser output (0-1).")
-    parser.add_argument("--diffusion-prior-type", choices=["tiny_score"], default="tiny_score", help="Score model backbone for the diffusion prior.")
+    parser.add_argument(
+        "--diffusion-prior-type",
+        choices=["tiny_score", "guided_uncond"],  # <<< CHANGED: allow guided_uncond
+        default="tiny_score",
+        help="Score model backbone for the diffusion prior.",
+    )
     parser.add_argument("--diffusion-prior-weights", type=Path, help="Path to diffusion score-model weights (.pth).")
     parser.add_argument("--diffusion-steps", type=int, default=12, help="Diffusion-score steps per ADMM iteration.")
     parser.add_argument("--diffusion-guidance", type=float, default=1.0, help="Guidance scale for the diffusion proximal operator.")
     parser.add_argument("--diffusion-noise-scale", type=float, default=1.0, help="Initial noise scale injected before diffusion refinement.")
     parser.add_argument("--diffusion-sigma-min", type=float, default=0.01, help="Minimum sigma for the diffusion schedule.")
     parser.add_argument("--diffusion-sigma-max", type=float, default=0.5, help="Maximum sigma for the diffusion schedule.")
-    parser.add_argument("--diffusion-schedule", choices=["geom", "linear"], default="geom", help="Sigma schedule type for the diffusion prior.")
+    parser.add_argument(
+        "--diffusion-schedule",
+        choices=["geom", "linear"],
+        default="geom",
+        help="Sigma schedule type for the diffusion prior.",
+    )
     parser.add_argument("--diffusion-device", choices=["cpu", "cuda", "dml"], help="Force device for the diffusion prior (defaults to auto).")
     parser.add_argument("--collect-only", action="store_true", help="Skip per-image folders; only write summary CSV.")
+    parser.add_argument(
+        "--mtf-aware",
+        action="store_true",
+        help="Enable MTF-aware ADMM data term weighting.",
+    )
+    parser.add_argument("--rho-min", type=float, default=0.02, help="Minimum rho to start with.")
+    parser.add_argument("--denoiser-interval", type=int, default=1, help="Apply the denoiser every N ADMM steps.")
+    parser.add_argument("--diffusion-prior-weight", type=float, default=0.4, help="Adjust the diffusion prior weight for z update")
     return parser.parse_args(argv)
 
 
@@ -106,7 +134,7 @@ def run_method(method: str, batch, args):
             beta1=args.adam_beta1,
             beta2=args.adam_beta2,
             denoiser_weight=args.adam_denoiser_weight,
-            denoiser_interval=args.adam_denoiser_interval,
+            denoiser_interval=args.adam_denoser_interval if hasattr(args, "adam_denoser_interval") else args.adam_denoiser_interval,  # optional guard
             denoiser_weights=args.denoiser_weights,
             denoiser_device=args.denoiser_device,
             denoiser_type=args.denoiser_type,
@@ -121,6 +149,9 @@ def run_method(method: str, batch, args):
             denoiser_weights=args.denoiser_weights,
             denoiser_device=args.denoiser_device,
             denoiser_type=args.denoiser_type,
+            use_mtf_weighting=args.mtf_aware,
+            rho_min=args.rho_min,
+            denoiser_interval=args.denoiser_interval,
         )
     if method == "admm_diffusion":
         return run_admm_diffusion_baseline(
@@ -137,6 +168,8 @@ def run_method(method: str, batch, args):
             diffusion_sigma_max=args.diffusion_sigma_max,
             diffusion_schedule=args.diffusion_schedule,
             diffusion_device=args.diffusion_device,
+            use_mtf_weighting=args.mtf_aware,           # MTF-aware *data term*
+            diffusion_prior_weight=args.diffusion_prior_weight,
         )
     raise ValueError(f"Unsupported method: {method}")
 
