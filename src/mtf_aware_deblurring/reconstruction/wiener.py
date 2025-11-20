@@ -5,7 +5,7 @@ from typing import Dict
 import numpy as np
 from numpy.fft import fft2, ifft2, ifftshift
 
-from ..metrics import psnr
+from ..metrics import psnr, ssim
 from ..optics import pad_to_shape
 from .results import ReconstructionResult
 
@@ -41,7 +41,8 @@ def run_wiener_baseline(
     for pattern, data in forward_results.items():
         recon = wiener_deconvolution(data["noisy"], data["kernel"], k=k)
         value = psnr(scene, recon)
-        outputs[pattern] = ReconstructionResult(reconstruction=recon, psnr=value)
+        ssim_val = ssim(scene, recon)
+        outputs[pattern] = ReconstructionResult(reconstruction=recon, psnr=value, ssim=ssim_val)
     return outputs
 
 

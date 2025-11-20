@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Literal, Optional
+from typing import Any, Callable, Dict, Literal, Optional
 
 import numpy as np
 from numpy.fft import fft2, ifft2, ifftshift
 
 from ..denoisers import build_denoiser
 from ..diffusion import DiffusionPrior, DiffusionPriorConfig, build_diffusion_prior
-from ..metrics import psnr
+from ..metrics import psnr, ssim
 from ..optics import pad_to_shape
 from .results import ReconstructionResult
 from ..denoisers.drunet_adapter import build_drunet_denoiser
-from .prior_scheduler import PhysicsAwareScheduler, PhysicsContext
+from .prior_scheduler import PhysicsAwareScheduler, PhysicsContext, SchedulerDecision
 
 _DEFAULT_DIFFUSION_CONFIG = DiffusionPriorConfig()
 
@@ -99,6 +99,8 @@ def admm_denoiser_deconvolution(
     mtf_scale: float = 1.5,
     mtf_floor: float = 0.2,
     sigma_scale: Optional[float] = None,
+    trace: Optional[list[Dict[str, Any]]] = None,
+    denoiser_state: Optional[Dict[str, Any]] = None,
 ) -> np.ndarray:
     """
     Plug-and-play ADMM solver that alternates between frequency-domain deblurring and
@@ -114,6 +116,7 @@ def admm_denoiser_deconvolution(
     otf, otf_conj = _prepare_otf(kernel_norm, obs.shape[:2])
     otf_abs2 = np.abs(otf) ** 2
     weight_map: Optional[np.ndarray] = None
+    weight_stats: Dict[str, float] = {}
     if mtf_weights is not None:
         w = np.asarray(mtf_weights, dtype=np.float32)
         max_val = float(w.max())
@@ -121,6 +124,11 @@ def admm_denoiser_deconvolution(
             w = w / max_val
         w = np.clip(w ** float(mtf_scale), float(mtf_floor), 1.0)
         weight_map = w
+        weight_stats = {
+            "mtf_weight_min": float(w.min()),
+            "mtf_weight_max": float(w.max()),
+            "mtf_weight_mean": float(w.mean()),
+        }
     denom = otf_abs2 + float(rho)
     if obs.ndim == 3:
         denom = denom[..., None]
@@ -152,6 +160,7 @@ def admm_denoiser_deconvolution(
         current_weight = denoiser_weight
         current_rho = rho
         current_sigma_scale = sigma_scale
+        decision: Optional[SchedulerDecision] = None
         if scheduler_active and scheduler is not None:
             decision = scheduler.plan_iteration(pattern_name, t)
             current_weight = float(np.clip(decision.denoiser_weight, 0.0, 1.0))
@@ -190,6 +199,24 @@ def admm_denoiser_deconvolution(
             forward = _apply_otf(x, otf)
             loss = float(np.mean((forward - obs) ** 2))
             callback(t, loss)
+
+        if trace is not None:
+            entry: Dict[str, Any] = {
+                "iteration": t,
+                "rho": float(current_rho),
+                "denoiser_weight": float(current_weight),
+                "sigma_scale": None if current_sigma_scale is None else float(current_sigma_scale),
+            }
+            if weight_stats:
+                entry.update(weight_stats)
+            if decision is not None:
+                entry["scheduler_extras"] = decision.extras
+            if denoiser_state is not None:
+                for key in ("last_sigma", "sigma"):
+                    if key in denoiser_state:
+                        entry["denoiser_sigma"] = float(denoiser_state[key])
+                        break
+            trace.append(entry)
 
     return x
 
@@ -301,6 +328,7 @@ def run_admm_denoiser_baseline(
     if is_drunet:
         mode = "color" if denoiser_type == "drunet_color" else "gray"
         active_pattern = {"name": None}
+        sigma_tracker: Dict[str, Any] = {"last_sigma": None}
 
         # Exponential schedule; modulated by the physics-aware scheduler if available.
         def sigma_schedule(t: int, T: int) -> float:
@@ -319,6 +347,7 @@ def run_admm_denoiser_baseline(
                 decision = scheduler.plan_iteration(pattern_name, t)
                 if decision.sigma_scale is not None:
                     base_sigma = float(np.clip(base_sigma * decision.sigma_scale, sigma_min, sigma_max * 1.5))
+            sigma_tracker["last_sigma"] = base_sigma
             return base_sigma
 
         denoiser = build_drunet_denoiser(
@@ -355,6 +384,7 @@ def run_admm_denoiser_baseline(
         if scheduler is not None:
             # sigma scaling will be provided per iteration; initialize hints
             sigma_scale = 1.0
+        trace: list[Dict[str, Any]] = []
         recon = admm_denoiser_deconvolution(
             data["noisy"],
             data["kernel"],
@@ -369,9 +399,17 @@ def run_admm_denoiser_baseline(
             mtf_scale=mtf_scale,
             mtf_floor=mtf_floor,
             sigma_scale=sigma_scale,
+            trace=trace,
+            denoiser_state=sigma_tracker if is_drunet else None,
         )
         value = psnr(scene, recon)
-        outputs[pattern] = ReconstructionResult(reconstruction=recon, psnr=value)
+        ssim_val = ssim(scene, recon)
+        outputs[pattern] = ReconstructionResult(
+            reconstruction=recon,
+            psnr=value,
+            ssim=ssim_val,
+            trace=trace if trace else None,
+        )
     return outputs
 
 
@@ -424,7 +462,8 @@ def run_admm_diffusion_baseline(
             diffusion_noise_scale=diffusion_noise_scale,
         )
         value = psnr(scene, recon)
-        outputs[pattern] = ReconstructionResult(reconstruction=recon, psnr=value)
+        ssim_val = ssim(scene, recon)
+        outputs[pattern] = ReconstructionResult(reconstruction=recon, psnr=value, ssim=ssim_val, trace=None)
     return outputs
 
 

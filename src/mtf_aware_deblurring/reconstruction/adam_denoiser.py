@@ -7,7 +7,7 @@ import numpy as np
 from numpy.fft import fft2, ifft2, ifftshift
 
 from ..denoisers import build_denoiser
-from ..metrics import psnr
+from ..metrics import psnr, ssim
 from ..optics import pad_to_shape
 from .results import ReconstructionResult
 
@@ -136,7 +136,8 @@ def run_adam_denoiser_baseline(
             denoiser=denoiser,
         )
         value = psnr(scene, recon)
-        outputs[pattern] = ReconstructionResult(reconstruction=recon, psnr=value)
+        ssim_val = ssim(scene, recon)
+        outputs[pattern] = ReconstructionResult(reconstruction=recon, psnr=value, ssim=ssim_val)
     return outputs
 
 

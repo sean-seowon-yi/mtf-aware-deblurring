@@ -135,6 +135,9 @@ class HeuristicPhysicsAwareScheduler(PhysicsAwareScheduler):
         default_rho: float = 0.4,
         sigma_base: float = 0.18,
         sigma_min: float = 0.02,
+        pattern_rho_schedule: Optional[Mapping[str, tuple[float, float]]] = None,
+        pattern_weight_schedule: Optional[Mapping[str, tuple[float, float]]] = None,
+        pattern_sigma_scale_schedule: Optional[Mapping[str, tuple[float, float]]] = None,
     ) -> None:
         super().__init__(total_iterations)
         self.weak_mtf_threshold = weak_mtf_threshold
@@ -144,16 +147,34 @@ class HeuristicPhysicsAwareScheduler(PhysicsAwareScheduler):
         self.default_rho = default_rho
         self.sigma_base = sigma_base
         self.sigma_min = sigma_min
+        # Optional per-pattern curves (start -> end multipliers) applied across iterations.
+        default_rho_sched = {"legendre": (1.1, 0.9)}
+        default_weight_sched = {"legendre": (1.05, 0.9)}
+        default_sigma_sched = {
+            "legendre": (0.9, 0.6),
+            "box": (1.0, 0.7),
+            "random": (1.0, 0.7),
+        }
+        self.pattern_rho_schedule = dict(default_rho_sched if pattern_rho_schedule is None else pattern_rho_schedule)
+        self.pattern_weight_schedule = dict(
+            default_weight_sched if pattern_weight_schedule is None else pattern_weight_schedule
+        )
+        self.pattern_sigma_scale_schedule = dict(
+            default_sigma_sched if pattern_sigma_scale_schedule is None else pattern_sigma_scale_schedule
+        )
 
     def plan_iteration(self, pattern: str, iteration: int) -> SchedulerDecision:
         ctx = self.get_context(pattern)
         if ctx is None:
-            sigma = self._sigma_schedule(iteration, aggressive=False)
+            sigma, sigma_scale = self._sigma_schedule(iteration, aggressive=False)
             return SchedulerDecision(
                 denoiser_type=self.default_denoiser,
-                denoiser_weight=self.conservative_weight,
-                rho=self.default_rho,
+                denoiser_weight=self._apply_pattern_schedule(
+                    pattern, self.conservative_weight, self.pattern_weight_schedule, iteration
+                ),
+                rho=self._apply_pattern_schedule(pattern, self.default_rho, self.pattern_rho_schedule, iteration),
                 sigma=sigma,
+                sigma_scale=self._apply_sigma_scale_schedule(pattern, sigma_scale, iteration),
                 extras={"reason": "default"},
             )
 
@@ -166,7 +187,10 @@ class HeuristicPhysicsAwareScheduler(PhysicsAwareScheduler):
 
         weight = self.aggressive_weight if hard_case else self.conservative_weight
         rho = self.default_rho * (0.7 if hard_case else 1.0)
+        weight = self._apply_pattern_schedule(pattern, weight, self.pattern_weight_schedule, iteration)
+        rho = self._apply_pattern_schedule(pattern, rho, self.pattern_rho_schedule, iteration)
         sigma, sigma_scale = self._sigma_schedule(iteration, aggressive=hard_case, summary=summary, pattern=pattern)
+        sigma_scale = self._apply_sigma_scale_schedule(pattern, sigma_scale, iteration)
 
         extras = {
             "mean_mtf": mtf_mean,
@@ -210,6 +234,37 @@ class HeuristicPhysicsAwareScheduler(PhysicsAwareScheduler):
         sigma = float(np.clip(sigma, 1e-3, 1.0))
         scale = sigma / max(self.sigma_base, 1e-3)
         return sigma, float(scale)
+
+    def _apply_pattern_schedule(
+        self,
+        pattern: str,
+        base_value: float,
+        schedule: Mapping[str, tuple[float, float]],
+        iteration: int,
+    ) -> float:
+        if not schedule:
+            return base_value
+        if pattern not in schedule:
+            return base_value
+        start, end = schedule[pattern]
+        frac = self._normalized_iteration(iteration)
+        scale = (1.0 - frac) * start + frac * end
+        return float(base_value * scale)
+
+    def _apply_sigma_scale_schedule(
+        self,
+        pattern: str,
+        sigma_scale: float,
+        iteration: int,
+    ) -> float:
+        if not self.pattern_sigma_scale_schedule:
+            return sigma_scale
+        if pattern not in self.pattern_sigma_scale_schedule:
+            return sigma_scale
+        start, end = self.pattern_sigma_scale_schedule[pattern]
+        frac = self._normalized_iteration(iteration)
+        mult = (1.0 - frac) * start + frac * end
+        return float(sigma_scale * mult)
 
 
 __all__ = [

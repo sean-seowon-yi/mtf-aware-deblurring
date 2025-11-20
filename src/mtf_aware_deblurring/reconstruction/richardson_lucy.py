@@ -5,7 +5,7 @@ from typing import Dict
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
-from ..metrics import psnr
+from ..metrics import psnr, ssim
 from ..optics import fft_convolve2d
 from .results import ReconstructionResult
 
@@ -88,7 +88,8 @@ def run_richardson_lucy_baseline(
             smooth_sigma=smooth_sigma,
         )
         value = psnr(scene, recon)
-        outputs[pattern] = ReconstructionResult(reconstruction=recon, psnr=value)
+        ssim_val = ssim(scene, recon)
+        outputs[pattern] = ReconstructionResult(reconstruction=recon, psnr=value, ssim=ssim_val)
     return outputs
 
 

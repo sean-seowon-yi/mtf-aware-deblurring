@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 import imageio.v2 as imageio
 import numpy as np
@@ -19,6 +20,21 @@ from ..reconstruction import (
 )
 
 
+def _serialize_args(args: argparse.Namespace) -> Dict[str, Any]:
+    """Convert argparse Namespace to JSON-friendly dict."""
+    payload: Dict[str, Any] = {}
+    for key, value in vars(args).items():
+        if isinstance(value, Path):
+            payload[key] = str(value)
+        elif isinstance(value, (str, int, float, bool)) or value is None:
+            payload[key] = value
+        elif isinstance(value, (list, tuple)):
+            payload[key] = [str(v) if isinstance(v, Path) else v for v in value]
+        else:
+            payload[key] = str(value)
+    return payload
+
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Run reconstruction baselines on DIV2K using the forward model.")
     parser.add_argument("--div2k-root", type=Path, required=True, help="Path containing DIV2K_* folders.")
@@ -26,6 +42,11 @@ def parse_args(argv=None):
     parser.add_argument("--degradation", default="bicubic", help="DIV2K degradation label.")
     parser.add_argument("--scale", default="X2", help="DIV2K scale folder (X2, X3, X4, ...).")
     parser.add_argument("--limit", type=int, default=10, help="Number of images to process (0 = all).")
+    parser.add_argument(
+        "--benchmark-preset",
+        choices=["small", "long"],
+        help="Optional preset for repeatable runs (small=10 imgs, long=200 imgs) unless limit is explicitly set.",
+    )
     parser.add_argument("--target-size", type=int, default=256, help="Optional square resize after loading.")
     parser.add_argument("--image-mode", choices=["grayscale", "rgb"], default="grayscale", help="Color mode.")
     parser.add_argument("--auto-download", action="store_true", help="Download DIV2K subset automatically if missing.")
@@ -74,6 +95,8 @@ def parse_args(argv=None):
     parser.add_argument("--diffusion-schedule", choices=["geom", "linear"], default="geom", help="Sigma schedule type for the diffusion prior.")
     parser.add_argument("--diffusion-device", choices=["cpu", "cuda", "dml"], help="Force device for the diffusion prior (defaults to auto).")
     parser.add_argument("--collect-only", action="store_true", help="Skip per-image folders; only write summary CSV.")
+    parser.add_argument("--enable-ssim", action="store_true", help="Also compute/log SSIM (default is PSNR-only outputs).")
+    parser.add_argument("--log-traces", action="store_true", help="Write per-iteration traces (ADMM denoiser only) to <method>_traces.jsonl.")
     return parser.parse_args(argv)
 
 
@@ -156,31 +179,72 @@ def run_method(method: str, batch, args):
 
 def main(argv=None):
     args = parse_args(argv)
+    if args.benchmark_preset:
+        if args.benchmark_preset == "small":
+            args.limit = 10
+        elif args.benchmark_preset == "long":
+            args.limit = 200
+
     summaries: List[Dict[str, object]] = []
     baseline_root: Optional[Path] = None
+    trace_path: Optional[Path] = None
+    trace_file = None
+    config_snapshot: Optional[Dict[str, Any]] = None
 
     persist_outputs = (not args.collect_only) or args.save_recon
     save_recon = args.save_recon
     method = args.method.lower()
 
-    for batch in run_forward_batches(args, baseline_name=method, persist_outputs=persist_outputs):
-        if baseline_root is None:
-            baseline_root = batch.baseline_root
+    try:
+        for batch in run_forward_batches(args, baseline_name=method, persist_outputs=persist_outputs):
+            if baseline_root is None:
+                baseline_root = batch.baseline_root
+                if args.log_traces:
+                    trace_path = baseline_root / f"{method}_traces.jsonl"
+                    config_snapshot = _serialize_args(args)
 
-        recon_results = run_method(method, batch, args)
+            recon_results = run_method(method, batch, args)
 
-        for pattern, result in recon_results.items():
-            if save_recon and batch.output_dir is not None:
-                recon_dir = batch.output_dir / method
-                save_recon_image(recon_dir, method, pattern, result.reconstruction)
-            summaries.append(
-                {
+            for pattern, result in recon_results.items():
+                if save_recon and batch.output_dir is not None:
+                    recon_dir = batch.output_dir / method
+                    save_recon_image(recon_dir, method, pattern, result.reconstruction)
+                row = {
                     "image": batch.image_path.name,
                     "pattern": pattern,
                     "psnr": result.psnr,
                 }
-            )
-            print(f"{batch.image_path.name} [{pattern}] PSNR: {result.psnr:.2f} dB")
+                if args.enable_ssim:
+                    row["ssim"] = result.ssim
+                summaries.append(row)
+                if args.enable_ssim:
+                    print(f"{batch.image_path.name} [{pattern}] PSNR: {result.psnr:.2f} dB | SSIM: {result.ssim:.4f}")
+                else:
+                    print(f"{batch.image_path.name} [{pattern}] PSNR: {result.psnr:.2f} dB")
+
+                if args.log_traces and result.trace:
+                    if trace_file is None and trace_path is not None:
+                        trace_path.parent.mkdir(parents=True, exist_ok=True)
+                        trace_file = trace_path.open("w")
+                    if trace_file is not None:
+                        metrics_payload = {"psnr": result.psnr}
+                        if args.enable_ssim:
+                            metrics_payload["ssim"] = result.ssim
+                        trace_file.write(
+                            json.dumps(
+                                {
+                                    "image": batch.image_path.name,
+                                    "pattern": pattern,
+                                    "metrics": metrics_payload,
+                                    "args": config_snapshot,
+                                    "trace": result.trace,
+                                }
+                            )
+                            + "\n"
+                        )
+    finally:
+        if trace_file is not None:
+            trace_file.close()
 
     if not summaries or baseline_root is None:
         print("No images processed; nothing to report.")
@@ -189,19 +253,37 @@ def main(argv=None):
     pattern_order = {p: idx for idx, p in enumerate(args.patterns)} if hasattr(args, 'patterns') else {}
     summaries.sort(key=lambda row: (row['image'], pattern_order.get(row['pattern'], len(pattern_order))))
 
-    csv_path = baseline_root / f"{method}_psnr.csv"
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["image", "pattern", "psnr"])
-        writer.writeheader()
-        writer.writerows(summaries)
-    print(f"Saved PSNR summary to {csv_path}")
+    if args.enable_ssim:
+        csv_path = baseline_root / f"{method}_metrics.csv"
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["image", "pattern", "psnr", "ssim"])
+            writer.writeheader()
+            writer.writerows(summaries)
+        print(f"Saved PSNR/SSIM summary to {csv_path}")
 
-    avg_by_pattern: Dict[str, List[float]] = {}
-    for row in summaries:
-        avg_by_pattern.setdefault(row["pattern"], []).append(row["psnr"])
-    for pattern, values in avg_by_pattern.items():
-        mean_val = sum(values) / len(values)
-        print(f"Average {pattern} PSNR: {mean_val:.2f} dB over {len(values)} images")
+        avg_by_pattern: Dict[str, Dict[str, List[float]]] = {}
+        for row in summaries:
+            metrics = avg_by_pattern.setdefault(row["pattern"], {"psnr": [], "ssim": []})
+            metrics["psnr"].append(row["psnr"])
+            metrics["ssim"].append(row["ssim"])
+        for pattern, values in avg_by_pattern.items():
+            mean_psnr = sum(values["psnr"]) / len(values["psnr"])
+            mean_ssim = sum(values["ssim"]) / len(values["ssim"])
+            print(f"Average {pattern}: PSNR {mean_psnr:.2f} dB | SSIM {mean_ssim:.4f} over {len(values['psnr'])} images")
+    else:
+        csv_path = baseline_root / f"{method}_psnr.csv"
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["image", "pattern", "psnr"])
+            writer.writeheader()
+            writer.writerows(summaries)
+        print(f"Saved PSNR summary to {csv_path}")
+
+        avg_by_pattern: Dict[str, List[float]] = {}
+        for row in summaries:
+            avg_by_pattern.setdefault(row["pattern"], []).append(row["psnr"])
+        for pattern, values in avg_by_pattern.items():
+            mean_val = sum(values) / len(values)
+            print(f"Average {pattern} PSNR: {mean_val:.2f} dB over {len(values)} images")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 from numpy.fft import fft2, fftshift
+from scipy.ndimage import gaussian_filter
 
 
 def _spectral_snr_single(img_clean: np.ndarray, img_noisy: np.ndarray, eps: float) -> np.ndarray:
@@ -31,4 +32,67 @@ def psnr(reference: np.ndarray, estimate: np.ndarray, data_range: float = 1.0, e
     return 10 * np.log10((data_range ** 2) / mse)
 
 
-__all__ = ["spectral_snr", "psnr"]
+def _ssim_single(
+    reference: np.ndarray,
+    estimate: np.ndarray,
+    *,
+    data_range: float,
+    win_size: int,
+    sigma: float,
+    K1: float,
+    K2: float,
+) -> float:
+    # Basic SSIM implementation using a Gaussian window via scipy.ndimage.gaussian_filter.
+    ref = reference.astype(np.float64)
+    est = estimate.astype(np.float64)
+    if ref.shape != est.shape:
+        raise ValueError("Reference and estimate must have the same shape for SSIM.")
+
+    c1 = (K1 * data_range) ** 2
+    c2 = (K2 * data_range) ** 2
+
+    # Gaussian smoothing approximates local means and variances.
+    mu_x = gaussian_filter(ref, sigma=sigma, truncate=win_size / (2 * sigma))
+    mu_y = gaussian_filter(est, sigma=sigma, truncate=win_size / (2 * sigma))
+
+    sigma_x2 = gaussian_filter(ref * ref, sigma=sigma, truncate=win_size / (2 * sigma)) - mu_x**2
+    sigma_y2 = gaussian_filter(est * est, sigma=sigma, truncate=win_size / (2 * sigma)) - mu_y**2
+    sigma_xy = gaussian_filter(ref * est, sigma=sigma, truncate=win_size / (2 * sigma)) - mu_x * mu_y
+
+    numerator = (2 * mu_x * mu_y + c1) * (2 * sigma_xy + c2)
+    denominator = (mu_x**2 + mu_y**2 + c1) * (sigma_x2 + sigma_y2 + c2)
+    ssim_map = numerator / (denominator + 1e-12)
+    return float(ssim_map.mean())
+
+
+def ssim(
+    reference: np.ndarray,
+    estimate: np.ndarray,
+    *,
+    data_range: float = 1.0,
+    win_size: int = 11,
+    sigma: float = 1.5,
+    K1: float = 0.01,
+    K2: float = 0.03,
+) -> float:
+    """
+    Structural Similarity Index (SSIM).
+
+    This implementation mirrors the standard formulation with a Gaussian
+    window. It supports grayscale (H,W) or channel-first/last images; channels
+    are averaged.
+    """
+    if reference.ndim == 2:
+        return _ssim_single(reference, estimate, data_range=data_range, win_size=win_size, sigma=sigma, K1=K1, K2=K2)
+    if reference.ndim == 3:
+        if estimate.shape != reference.shape:
+            raise ValueError("Reference and estimate must have the same shape for SSIM.")
+        scores = [
+            _ssim_single(reference[..., c], estimate[..., c], data_range=data_range, win_size=win_size, sigma=sigma, K1=K1, K2=K2)
+            for c in range(reference.shape[2])
+        ]
+        return float(np.mean(scores))
+    raise ValueError("ssim expects 2D or 3D inputs.")
+
+
+__all__ = ["spectral_snr", "psnr", "ssim"]
