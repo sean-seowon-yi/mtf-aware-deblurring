@@ -171,6 +171,110 @@ def _apply_guided_prior_patchwise(
 
     return np.clip(out, 0.0, 1.0).astype(np.float32)
 
+# ------------------------------------------------------------------------------
+# tau update
+# ------------------------------------------------------------------------------
+
+def _estimate_noise_sigma_mad(image: np.ndarray) -> float:
+    """
+    Estimate spatial-domain noise standard deviation using a simple MAD
+    (median absolute deviation) on finite differences.
+
+    Assumes:
+    - image is float32, roughly in [0, 1].
+    - noise is approximately i.i.d. and dominates high-frequency differences.
+
+    Returns
+    -------
+    float
+        Estimated noise sigma. Returns 0.0 if estimation fails.
+    """
+    img = np.asarray(image, dtype=np.float32)
+
+    # Convert color to gray by averaging channels (noise level should be similar)
+    if img.ndim == 3:
+        img = img.mean(axis=2)
+
+    H, W = img.shape[:2]
+    if H < 2 or W < 2:
+        return 0.0
+
+    # Simple high-frequency proxy: finite differences
+    dx = img[:, 1:] - img[:, :-1]
+    dy = img[1:, :] - img[:-1, :]
+
+    diffs = np.concatenate([dx.ravel(), dy.ravel()])
+    if diffs.size == 0:
+        return 0.0
+
+    diffs = diffs[np.isfinite(diffs)]
+    if diffs.size == 0:
+        return 0.0
+
+    med = np.median(diffs)
+    mad = np.median(np.abs(diffs - med))
+    if mad <= 0.0 or not np.isfinite(mad):
+        return 0.0
+
+    # For Gaussian noise, sigma ≈ MAD / 0.6745
+    sigma = mad / 0.6745
+    return float(sigma)
+
+def _infer_tau_from_observation(
+    obs: np.ndarray,
+    tau_min: float = 1e-4,
+    tau_max: float = 1e-1,
+) -> float:
+    """
+    Infer a dimensionless noise-to-signal power ratio tau from the observation.
+
+    We interpret tau as:
+
+        tau ≈ Var(noise) / Var(signal)
+
+    which matches the role it plays in the Wiener-like MTF weighting:
+
+        W0(f) = |H(f)|^2 / (|H(f)|^2 + tau)
+
+    Steps:
+    - Estimate noise sigma via MAD on finite differences.
+    - Estimate total variance of the observation.
+    - Approximate signal variance as Var(y) - Var(noise), floored at small > 0.
+    - Set tau = Var(noise) / Var(signal), then clamp to [tau_min, tau_max].
+
+    Parameters
+    ----------
+    obs : np.ndarray
+        Observed image, assumed float32 in [0, 1].
+    tau_min : float
+        Lower bound for tau (avoid degenerate zero).
+    tau_max : float
+        Upper bound for tau (avoid absurdly large NSR).
+
+    Returns
+    -------
+    float
+        Inferred tau to be passed into _build_mtf_weights.
+    """
+    obs_f = np.asarray(obs, dtype=np.float32)
+    if obs_f.size == 0:
+        return tau_min
+
+    sigma_n = _estimate_noise_sigma_mad(obs_f)
+    if sigma_n <= 0.0 or not np.isfinite(sigma_n):
+        return tau_min
+
+    var_y = float(np.var(obs_f))
+    if not np.isfinite(var_y) or var_y <= 0.0:
+        return tau_min
+
+    var_n = sigma_n**2
+    var_x = max(var_y - var_n, 1e-6)  # approximate signal variance
+
+    tau = var_n / var_x  # noise-to-signal power ratio
+    tau = float(np.clip(tau, tau_min, tau_max))
+    return tau
+
 
 # ------------------------------------------------------------------------------
 # MTF tools
@@ -190,53 +294,186 @@ def _build_mtf_weights(
     floor: float = 0.05,
 ) -> np.ndarray:
     """
-    Build per-frequency weights from MTF^2:
+    Build per-frequency weights from MTF^2 in a statistically motivated way.
 
-    - Normalize |H|^2 to [0, 1].
-    - Apply exponent alpha (< 1) to compress dynamic range.
-    - Clamp to [floor, 1] so we never fully ignore the data term.
+    We interpret `tau` as an approximate noise-to-signal power ratio in the
+    frequency domain and use a Wiener-like base weight
+
+        W0(f) = |H(f)|^2 / (|H(f)|^2 + tau)
+
+    so that frequencies with very low MTF receive less weight in the data term.
+    We then optionally compress the dynamic range with `alpha` and clamp to
+    [floor, 1] so that the data term is never completely ignored.
+
+    Parameters
+    ----------
+    mtf2 : np.ndarray
+        Array of |H(f)|^2 for the current kernel and image size.
+    tau : float, optional
+        Approximate noise-to-signal power ratio in the frequency domain.
+        Larger values make the weighting more conservative (more downweighting
+        of low-MTF frequencies).
+    alpha : float, optional
+        Exponent for dynamic-range compression. alpha < 1 flattens the range,
+        alpha = 1 keeps the Wiener weights as-is.
+    floor : float, optional
+        Minimum allowed weight. Ensures no frequency is completely discarded.
+
+    Returns
+    -------
+    np.ndarray
+        Frequency weights W(f) with the same shape as mtf2, dtype float32.
     """
-    eps = 1e-8
-    mtf2_max = float(mtf2.max())
-    if not np.isfinite(mtf2_max) or mtf2_max <= 0.0:
+    # Ensure numeric stability and correct dtype
+    mtf2 = np.asarray(mtf2, dtype=np.float32)
+    if mtf2.size == 0:
         return np.ones_like(mtf2, dtype=np.float32)
 
-    mtf2_norm = (mtf2 / (mtf2_max + eps)).astype(np.float32)
-    W = np.power(mtf2_norm, alpha)
-    W = np.clip(W, floor, 1.0)
+    # Clip negative numerical noise
+    mtf2_clipped = np.clip(mtf2, 0.0, None)
+    mtf2_max = float(mtf2_clipped.max())
+    if not np.isfinite(mtf2_max) or mtf2_max <= 0.0:
+        # Degenerate kernel: fall back to uniform weighting
+        return np.ones_like(mtf2_clipped, dtype=np.float32)
+
+    # --- NEW: Wiener-like base weight ---------------------------------------
+    # tau approximates noise power: when |H|^2 << tau, W0 ~ 0; when |H|^2 >> tau, W0 ~ 1.
+    tau_eff = max(float(tau), 1e-12)
+    W0 = mtf2_clipped / (mtf2_clipped + tau_eff)
+
+    # --- NEW: Optional dynamic-range compression using alpha ----------------
+    if alpha != 1.0:
+        W = np.power(W0, alpha, dtype=np.float32)
+    else:
+        W = W0.astype(np.float32)
+
+    # --- Same as before: enforce a floor to never completely ignore data ----
+    W = np.clip(W, floor, 1.0, out=W)
     return W
 
 
-def _mtf_quality_from_kernel(kernel: np.ndarray, image_shape: tuple[int, int], tau: float = 1e-3) -> float:
-    mtf2 = _compute_mtf2(kernel, image_shape)
-    mtf2_max = float(mtf2.max())
-    if not np.isfinite(mtf2_max) or mtf2_max <= 0.0:
+
+def _mtf_quality_from_kernel(
+    kernel: np.ndarray,
+    image_shape: tuple[int, int],
+    tau: float = 1e-3,
+) -> float:
+    """
+    Compute a scalar MTF 'quality' score in [0, 1] from the kernel and image shape.
+
+    Compared to a plain global average, this version:
+    - Computes MTF^2 over the image's frequency grid.
+    - Normalizes to [0, 1].
+    - Focuses on a mid-high frequency band (in normalized radial frequency),
+      where blur is most damaging.
+    - Ignores frequencies where the normalized MTF^2 is below `tau`.
+
+    The result is a more informative measure of how well the optics preserve
+    useful detail, especially for motion / coded blur patterns.
+
+    Parameters
+    ----------
+    kernel : np.ndarray
+        Blur kernel (PSF).
+    image_shape : tuple[int, int]
+        (H, W) of the corresponding image domain.
+    tau : float, optional
+        Threshold on normalized MTF^2. Frequencies with MTF^2 <= tau are ignored.
+
+    Returns
+    -------
+    float
+        MTF quality score Q in [0, 1]. Lower means worse mid–high-frequency MTF.
+    """
+    H, W = int(image_shape[0]), int(image_shape[1])
+    if H <= 0 or W <= 0:
         return 0.0
 
-    mtf2_max = mtf2_max + 1e-8
-    mtf2_norm = mtf2 / mtf2_max
-    mask = mtf2_norm > tau
-    if not mask.any():
+    mtf2 = _compute_mtf2(kernel, (H, W)).astype(np.float32)
+    mtf2 = np.clip(mtf2, 0.0, None)
+
+    mtf2_max = float(mtf2.max())
+    if not np.isfinite(mtf2_max) or mtf2_max <= 0.0:
+        # Degenerate kernel
         return 0.0
-    return float(mtf2_norm[mask].mean())
+
+    # Normalize MTF^2 to [0, 1]
+    mtf2_norm = mtf2 / (mtf2_max + 1e-8)
+
+    # --- Build a normalized radial frequency grid ---------------------------
+    # Frequencies in cycles per pixel along each axis
+    fy = np.fft.fftfreq(H, d=1.0)  # shape (H,)
+    fx = np.fft.fftfreq(W, d=1.0)  # shape (W,)
+    FY, FX = np.meshgrid(fy, fx, indexing="ij")
+    rad = np.sqrt(FX**2 + FY**2)
+
+    # Normalize radius to [0, 1]
+    rad_max = float(rad.max())
+    if not np.isfinite(rad_max) or rad_max <= 0.0:
+        return 0.0
+    rad_norm = rad / rad_max
+
+    # --- Focus on a mid–high frequency band --------------------------------
+    # E.g. 0.2–0.8 of the radial range: ignore DC and extreme Nyquist edge.
+    band_lo = 0.2
+    band_hi = 0.8
+    band_mask = (rad_norm >= band_lo) & (rad_norm <= band_hi)
+
+    # --- Combine band selection with MTF threshold --------------------------
+    mtf_mask = (mtf2_norm > tau)
+    mask = band_mask & mtf_mask
+
+    if not mask.any():
+        # Fallback: if mid–high band is empty, try the global mask
+        if mtf_mask.any():
+            return float(mtf2_norm[mtf_mask].mean())
+        return 0.0
+
+    Q = float(mtf2_norm[mask].mean())
+    # Ensure Q in [0, 1]
+    if not np.isfinite(Q):
+        return 0.0
+    return float(np.clip(Q, 0.0, 1.0))
+
 
 
 def _mtf_adaptive_sigma_bounds(Q: float) -> tuple[float, float]:
     """
-    Map an MTF quality scalar Q (~[0, 1]) to (sigma_max, sigma_min).
+    Map an MTF quality scalar Q (~[0, 1]) to (sigma_max, sigma_min) for DRUNet /
+    score-based priors.
 
-    Lower Q (worse MTF) -> larger sigmas (stronger prior).
+    Lower Q (worse mid-high-frequency MTF) -> larger sigmas (stronger prior).
+    Higher Q (better MTF) -> smaller sigmas (we trust the data more).
 
-    Intended for DRUNet / score-based priors that expect pixel-noise-like sigma.
-    Not used directly for guided_uncond (which uses normalized levels).
+    Compared to a purely linear mapping, this version uses a mild nonlinearity
+    to avoid over-penalizing moderate-quality kernels while still giving a
+    clear boost in prior strength for very poor MTF.
+
+    Returns (sigma_max, sigma_min) in the same units as your DRUNet / diffusion
+    sigma convention (e.g. [0, 50] for pixel-noise-like standard deviation).
     """
+    # Base ranges (you can tune these to your dataset)
     SIGMA_MAX_LO, SIGMA_MAX_HI = 25.0, 40.0
     SIGMA_MIN_LO, SIGMA_MIN_HI = 8.0, 20.0
 
+    # Clamp Q to [0, 1]
     Q_clamped = float(np.clip(Q, 0.0, 1.0))
-    sigma_max = SIGMA_MAX_LO + (1.0 - Q_clamped) * (SIGMA_MAX_HI - SIGMA_MAX_LO)
-    sigma_min = SIGMA_MIN_LO + (1.0 - Q_clamped) * (SIGMA_MIN_HI - SIGMA_MIN_LO)
-    return sigma_max, sigma_min
+
+    # --- Mild nonlinearity: emphasize differences near Q ~ 0 ----------------
+    # Q_eff = Q^beta with beta < 1 stretches lower values and compresses higher ones.
+    beta = 0.7
+    Q_eff = Q_clamped**beta
+
+    # Interpolate between "worst" and "best" according to 1 - Q_eff
+    # Q_eff = 1   -> (SIGMA_MAX_LO, SIGMA_MIN_LO)
+    # Q_eff = 0   -> (SIGMA_MAX_HI, SIGMA_MIN_HI)
+    t = 1.0 - Q_eff
+
+    sigma_max = SIGMA_MAX_LO + t * (SIGMA_MAX_HI - SIGMA_MAX_LO)
+    sigma_min = SIGMA_MIN_LO + t * (SIGMA_MIN_HI - SIGMA_MIN_LO)
+
+    return float(sigma_max), float(sigma_min)
+
 
 
 def _build_sigma_schedule(
@@ -312,11 +549,14 @@ def admm_denoiser_deconvolution(
 
     mtf2 = np.abs(otf) ** 2
     if use_mtf_weighting:
-        W_2d = _build_mtf_weights(mtf2)
+        # NEW: infer tau from the observation (noise-to-signal ratio)
+        tau_est = _infer_tau_from_observation(obs)
+        W_2d = _build_mtf_weights(mtf2, tau=tau_est)
         denom_2d = mtf2 * W_2d + float(rho)
     else:
         W_2d = None
         denom_2d = mtf2 + float(rho)
+
 
     Y_fft = _fft2_image(obs)
 
@@ -464,11 +704,14 @@ def admm_diffusion_deconvolution(
 
     mtf2 = np.abs(otf) ** 2
     if use_mtf_weighting:
-        W_2d = _build_mtf_weights(mtf2)
+        # NEW: infer tau from the observation for diffusion ADMM as well
+        tau_est = _infer_tau_from_observation(obs)
+        W_2d = _build_mtf_weights(mtf2, tau=tau_est)
         denom_2d = mtf2 * W_2d + float(rho)
     else:
         W_2d = None
         denom_2d = mtf2 + float(rho)
+
 
     Y_fft = _fft2_image(obs)
 
