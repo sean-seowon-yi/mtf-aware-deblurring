@@ -1,5 +1,3 @@
-# mtf_aware_deblurring/denoisers/drunet_adapter.py
-
 from typing import Callable, Optional
 
 import numpy as np
@@ -17,10 +15,7 @@ def build_drunet_denoiser(
     iterations: int | None = None,
 ):
     """
-    Returns a numpy-friendly callable: f(x_np) -> x_denoised_np.
-
-    If sigma_schedule is provided, we compute sigma_t = sigma_schedule(t, iterations)
-    where t = denoiser call index (1-based). Otherwise we use sigma_init.
+    Returns a numpy-friendly callable: f(x_np, sigma=None) -> x_denoised_np.
     """
 
     if mode == "color":
@@ -44,22 +39,26 @@ def build_drunet_denoiser(
 
     model.eval()
 
-    # keep track of how many times we've called the denoiser
+    # Keep track of internal steps (optional fallback)
     state = {"t": 0}
     T = iterations
 
     def reset_state() -> None:
         state["t"] = 0
 
-    def denoise_np(x_np: np.ndarray) -> np.ndarray:
+    def denoise_np(x_np: np.ndarray, sigma: Optional[float] = None) -> np.ndarray:
         state["t"] += 1
         t = state["t"]
 
-        # decide sigma_t
-        if sigma_schedule is not None and T is not None:
+        # --- LOGIC FIX: Priority to explicit sigma ---
+        if sigma is not None:
+            # Trust the PnP solver's sigma (assumed to be in [0, 255] scale here)
+            sigma_t = float(sigma)
+        elif sigma_schedule is not None and T is not None:
             sigma_t = float(sigma_schedule(t, T))
         else:
             sigma_t = float(sigma_init)
+        # ---------------------------------------------
 
         if x_np.ndim == 2:
             x_np_ = x_np[..., None]
@@ -83,7 +82,7 @@ def build_drunet_denoiser(
         x_t = x_t.to(model.device)
 
         with torch.no_grad():
-            # pass sigma_t explicitly (in [0, 255] convention)
+            # DRUNet expects sigma in [0, 255]
             y_t = model(x_t, sigma=sigma_t)
 
         y_np = y_t.squeeze(0).permute(1, 2, 0).cpu().numpy()

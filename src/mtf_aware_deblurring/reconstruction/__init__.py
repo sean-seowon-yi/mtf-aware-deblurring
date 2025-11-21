@@ -11,7 +11,7 @@ from .admm_denoiser import (
 from .prior_scheduler import (
     PhysicsContext,
     PhysicsAwareScheduler,
-    HeuristicPhysicsAwareScheduler,
+    AdaptivePhysicsScheduler,  # <--- Updated: Replaced Heuristic with Adaptive
     SchedulerDecision,
 )
 
@@ -32,6 +32,6 @@ __all__ = [
     "run_admm_diffusion_baseline",
     "PhysicsContext",
     "PhysicsAwareScheduler",
-    "HeuristicPhysicsAwareScheduler",
+    "AdaptivePhysicsScheduler", # <--- Updated in __all__
     "SchedulerDecision",
 ]
