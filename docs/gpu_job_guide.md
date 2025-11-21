@@ -5,7 +5,12 @@
 - Explicit command: `ssh -i ~/.ssh/codex_lab yazdinip@comps2.cs.toronto.edu`
 
 ## Lessons / fast path
-- Start a tmux before grabbing the GPU shell (`tmux new -s codex_gpu`) so the `srun --pty bash -l` session stays alive for multiple runs.
+- Before launching, check which GPU nodes are idle to avoid queued jobs:
+  ```
+  sinfo -p gpunodes -N -o "%15N %5t %10m %10G %8c %16e"
+  ```
+  Pick an `idle` node SKU that suits your run (rtx_4090/rtx_40 > rtx_a4/rtx_a6/gtx_10).
+- Start tmux **inside** the interactive GPU shell (not before `srun`), e.g. `tmux new -s codex_gpu`, so the `srun --pty bash -l` session stays alive for multiple runs without background loops.
 - Keep env and caches in `/tmp/$USER/...` to avoid quota issues: `python3 -m venv /tmp/$USER/envs/CSC2529` and `export PIP_CACHE_DIR=/tmp/$USER/pip-cache`.
 - Install project and missing deps in one go: `pip install --no-cache-dir -e . scipy` (SciPy is required for the reconstruction import path).
 - When possible, attach to tmux and paste commands directly instead of `tmux send-keys` to dodge quoting errors.
@@ -51,17 +56,16 @@
     --image-mode rgb \
     --limit 1 \
     --auto-download \
-    --method admm \
-    --admm-iters 60 \
-    --admm-rho 0.4 \
-    --admm-denoiser-weight 1.0 \
-    --admm-mtf-scale 0.35 \
-    --admm-mtf-floor 0.05 \
-    --denoiser-type drunet_color \
-    --denoiser-device cuda \
-    --use-physics-scheduler \
-    --collect-only \
-    --output-dir $HOME/mtf-smoke/admm-physics
+  --method admm \
+  --admm-iters 60 \
+  --admm-rho 0.4 \
+  --admm-denoiser-weight 1.0 \
+  --admm-mtf-weighting-mode none \
+  --denoiser-type drunet_color \
+  --denoiser-device cuda \
+  --use-physics-scheduler \
+  --collect-only \
+  --output-dir $HOME/mtf-smoke/admm-physics
   ```
 - Adjust ADMM/denoiser flags as needed; `--limit 1` keeps it to one image.
 

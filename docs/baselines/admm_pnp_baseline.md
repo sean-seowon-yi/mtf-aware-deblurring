@@ -12,13 +12,14 @@
     --subset train --degradation bicubic --scale X2 \
     --image-mode grayscale --limit 5 \
     --patterns box random legendre \
-    --method admm \
-    --admm-iters 40 \
-    --admm-rho 0.4 \
-    --admm-denoiser-weight 1.0 \
-    --denoiser-type <tiny|dncnn|unet> \
-    --denoiser-device <cpu|cuda|dml> \
-    --collect-only
+  --method admm \
+  --admm-iters 40 \
+  --admm-rho 0.4 \
+  --admm-denoiser-weight 1.0 \
+  --admm-mtf-weighting-mode none \
+  --denoiser-type <tiny|dncnn|unet> \
+  --denoiser-device <cpu|cuda|dml> \
+  --collect-only
   ```
 - Outputs land in `forward_model_outputs/reconstruction/admm/`.
 
@@ -31,6 +32,7 @@
 | UNet (`--denoiser-type unet`) | 24.10 | 25.17 | 25.74 | Fine-tuned via `scripts/train_unet_denoiser.py`. Expect gains once the UNet sees more epochs or RGB training. |
 
 All three priors share the same CLI; only `--denoiser-type` (and optionally `--denoiser-weights`) changes.
+If you want to ablate physics hooks: enable the scheduler with `--use-physics-scheduler` and choose an MTF weighting mode (`none` default; `gamma`, `wiener`, or `combined`), plus `--admm-mtf-sigma-adapt` for DRUNet sigma adaptation.
 
 ## ADMM + Diffusion Prior
 

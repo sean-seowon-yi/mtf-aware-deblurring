@@ -13,6 +13,13 @@ from ..optics import pad_to_shape
 from .results import ReconstructionResult
 from ..denoisers.drunet_adapter import build_drunet_denoiser
 from .prior_scheduler import PhysicsAwareScheduler, PhysicsContext, SchedulerDecision
+from .mtf_utils import (
+    build_mtf_weights,
+    compute_mtf2,
+    infer_tau_from_observation,
+    mtf_adaptive_sigma_bounds,
+    mtf_quality_from_kernel,
+)
 
 _DEFAULT_DIFFUSION_CONFIG = DiffusionPriorConfig()
 
@@ -96,6 +103,7 @@ def admm_denoiser_deconvolution(
     scheduler: Optional[PhysicsAwareScheduler] = None,
     pattern_name: Optional[str] = None,
     mtf_weights: Optional[np.ndarray] = None,
+    mtf_weights_ready: bool = False,
     mtf_scale: float = 1.5,
     mtf_floor: float = 0.2,
     sigma_scale: Optional[float] = None,
@@ -119,10 +127,11 @@ def admm_denoiser_deconvolution(
     weight_stats: Dict[str, float] = {}
     if mtf_weights is not None:
         w = np.asarray(mtf_weights, dtype=np.float32)
-        max_val = float(w.max())
-        if max_val > 0:
-            w = w / max_val
-        w = np.clip(w ** float(mtf_scale), float(mtf_floor), 1.0)
+        if not mtf_weights_ready:
+            max_val = float(w.max())
+            if max_val > 0:
+                w = w / max_val
+            w = np.clip(w ** float(mtf_scale), float(mtf_floor), 1.0)
         weight_map = w
         weight_stats = {
             "mtf_weight_min": float(w.min()),
@@ -320,6 +329,12 @@ def run_admm_denoiser_baseline(
     pattern_contexts: Optional[Dict[str, PhysicsContext]] = None,
     mtf_scale: float = 1.5,
     mtf_floor: float = 0.2,
+    mtf_weighting_mode: Literal["gamma", "wiener", "combined", "none"] = "none",
+    mtf_wiener_alpha: float = 0.5,
+    mtf_wiener_floor: float = 0.05,
+    mtf_wiener_tau_min: float = 1e-4,
+    mtf_wiener_tau_max: float = 1e-1,
+    mtf_sigma_adapt: bool = False,
 ) -> Dict[str, ReconstructionResult]:
 
     denoiser: Callable[[np.ndarray], np.ndarray]
@@ -327,16 +342,23 @@ def run_admm_denoiser_baseline(
 
     if is_drunet:
         mode = "color" if denoiser_type == "drunet_color" else "gray"
-        active_pattern = {"name": None}
+        active_pattern: Dict[str, Any] = {"name": None}
         sigma_tracker: Dict[str, Any] = {"last_sigma": None}
 
         # Exponential schedule; modulated by the physics-aware scheduler if available.
         def sigma_schedule(t: int, T: int) -> float:
             pattern_name = active_pattern["name"]
-            if pattern_name == "legendre":
+            sigma_max, sigma_min = 25.0, 8.0
+            if mtf_sigma_adapt and pattern_name is not None:
+                kernel = active_pattern.get("kernel")
+                image_shape = active_pattern.get("image_shape")
+                if kernel is not None and image_shape is not None:
+                    Q = mtf_quality_from_kernel(kernel, image_shape)
+                    # Only adapt for weak/medium MTF cases; leave high quality cases at defaults.
+                    if Q < 0.7:
+                        sigma_max, sigma_min = mtf_adaptive_sigma_bounds(Q)
+            elif pattern_name == "legendre":
                 sigma_max, sigma_min = 40.0, 20.0
-            else:
-                sigma_max, sigma_min = 25.0, 8.0
             if T <= 1:
                 base_sigma = sigma_min
             else:
@@ -372,22 +394,65 @@ def run_admm_denoiser_baseline(
     for pattern, data in forward_results.items():
         if is_drunet:
             active_pattern["name"] = pattern
+            active_pattern["kernel"] = data.get("kernel")
+            active_pattern["image_shape"] = data.get("noisy", scene).shape[:2]
         if scheduler is not None:
             scheduler.reset()
         ctx = None
         if pattern_contexts is not None:
             ctx = pattern_contexts.get(pattern)
-        mtf_weights = None
-        if ctx is not None:
-            mtf_weights = _build_trust_mask(ctx.mtf, pattern, scale=mtf_scale, floor=mtf_floor)
+        noisy = np.asarray(data["noisy"], dtype=np.float32)
+        kernel = np.asarray(data["kernel"], dtype=np.float32)
+
+        mtf_weights: Optional[np.ndarray] = None
+        mtf_weights_ready = False
+        gamma_mask: Optional[np.ndarray] = None
+        wiener_mask: Optional[np.ndarray] = None
+        if ctx is not None and mtf_weighting_mode in ("gamma", "combined"):
+            gamma_mask = _build_trust_mask(ctx.mtf, pattern, scale=mtf_scale, floor=mtf_floor)
+        if mtf_weighting_mode in ("wiener", "combined"):
+            mtf2 = compute_mtf2(kernel, noisy.shape[:2])
+            tau_est = infer_tau_from_observation(
+                noisy, tau_min=mtf_wiener_tau_min, tau_max=mtf_wiener_tau_max
+            )
+            wiener_mask = build_mtf_weights(
+                mtf2,
+                tau=tau_est,
+                alpha=mtf_wiener_alpha,
+                floor=mtf_wiener_floor,
+            )
+        if mtf_weighting_mode == "gamma":
+            mtf_weights = gamma_mask
+            mtf_weights_ready = False
+        elif mtf_weighting_mode == "wiener":
+            mtf_weights = wiener_mask
+            mtf_weights_ready = True
+        elif mtf_weighting_mode == "combined":
+            if gamma_mask is not None and wiener_mask is not None:
+                combined = gamma_mask * wiener_mask
+                max_val = float(combined.max())
+                if max_val > 0:
+                    combined = combined / max_val
+                combined = np.clip(combined, min(mtf_floor, mtf_wiener_floor), 1.0)
+                mtf_weights = combined.astype(np.float32)
+                mtf_weights_ready = True
+            elif gamma_mask is not None:
+                mtf_weights = gamma_mask
+                mtf_weights_ready = False
+            else:
+                mtf_weights = wiener_mask
+                mtf_weights_ready = True
+        else:
+            mtf_weights = None
+            mtf_weights_ready = False
         sigma_scale = None
         if scheduler is not None:
             # sigma scaling will be provided per iteration; initialize hints
             sigma_scale = 1.0
         trace: list[Dict[str, Any]] = []
         recon = admm_denoiser_deconvolution(
-            data["noisy"],
-            data["kernel"],
+            noisy,
+            kernel,
             iterations=iterations,
             rho=rho,
             denoiser_weight=denoiser_weight,
@@ -401,6 +466,7 @@ def run_admm_denoiser_baseline(
             sigma_scale=sigma_scale,
             trace=trace,
             denoiser_state=sigma_tracker if is_drunet else None,
+            mtf_weights_ready=mtf_weights_ready,
         )
         value = psnr(scene, recon)
         ssim_val = ssim(scene, recon)

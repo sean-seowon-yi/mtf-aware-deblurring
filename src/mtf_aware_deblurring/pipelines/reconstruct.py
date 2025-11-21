@@ -84,6 +84,31 @@ def parse_args(argv=None):
     parser.add_argument("--admm-denoiser-weight", type=float, default=1.0, help="Blend weight applied to the denoiser output (0-1).")
     parser.add_argument("--admm-mtf-scale", type=float, default=0.0, help="Exponent applied to the MTF trust mask (set 0 to disable).")
     parser.add_argument("--admm-mtf-floor", type=float, default=0.0, help="Minimum value for the MTF trust mask (set 0 to disable).")
+    parser.add_argument(
+        "--admm-mtf-weighting-mode",
+        choices=["gamma", "wiener", "combined", "none"],
+        default="none",
+        help="MTF weighting strategy for the ADMM data term.",
+    )
+    parser.add_argument("--admm-mtf-wiener-alpha", type=float, default=0.5, help="Alpha for Wiener-like MTF weights.")
+    parser.add_argument("--admm-mtf-wiener-floor", type=float, default=0.05, help="Floor for Wiener-like MTF weights.")
+    parser.add_argument(
+        "--admm-mtf-wiener-tau-min",
+        type=float,
+        default=1e-4,
+        help="Lower bound for inferred tau used in Wiener-like MTF weighting.",
+    )
+    parser.add_argument(
+        "--admm-mtf-wiener-tau-max",
+        type=float,
+        default=1e-1,
+        help="Upper bound for inferred tau used in Wiener-like MTF weighting.",
+    )
+    parser.add_argument(
+        "--admm-mtf-sigma-adapt",
+        action="store_true",
+        help="Adapt DRUNet sigma bounds from kernel MTF quality (per pattern) (off by default).",
+    )
     parser.add_argument("--use-physics-scheduler", action="store_true", help="Enable the heuristic physics-aware prior scheduler for ADMM.")
     parser.add_argument("--diffusion-prior-type", choices=["tiny_score"], default="tiny_score", help="Score model backbone for the diffusion prior.")
     parser.add_argument("--diffusion-prior-weights", type=Path, help="Path to diffusion score-model weights (.pth).")
@@ -157,6 +182,12 @@ def run_method(method: str, batch, args):
             pattern_contexts=batch.pattern_contexts,
             mtf_scale=args.admm_mtf_scale,
             mtf_floor=args.admm_mtf_floor,
+            mtf_weighting_mode=args.admm_mtf_weighting_mode,
+            mtf_wiener_alpha=args.admm_mtf_wiener_alpha,
+            mtf_wiener_floor=args.admm_mtf_wiener_floor,
+            mtf_wiener_tau_min=args.admm_mtf_wiener_tau_min,
+            mtf_wiener_tau_max=args.admm_mtf_wiener_tau_max,
+            mtf_sigma_adapt=args.admm_mtf_sigma_adapt,
         )
     if method == "admm_diffusion":
         return run_admm_diffusion_baseline(
