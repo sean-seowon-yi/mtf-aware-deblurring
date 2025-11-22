@@ -69,6 +69,17 @@
   ```
 - Adjust ADMM/denoiser flags as needed; `--limit 1` keeps it to one image.
 
+## Run sweeps (modification branch)
+- A helper script sweeps ADMM hyperparameters (rho/denoiser-weight/MTF mode) on the modification branch. It assumes your venv is already set up on the node:
+  ```
+  cd ~/mtf-aware-deblurring
+  bash scripts/admm_sweep_modification.sh $HOME/mtf-smoke/admm-sweeps-mod50 data 50 \
+    > $HOME/mtf-smoke/admm-sweeps-mod50.log 2>&1 &
+  ```
+  - Outputs: one folder per run under `$HOME/mtf-smoke/admm-sweeps-mod50/` plus a consolidated `sweep_summary.csv`.
+  - Defaults: rho ∈ {0.75,0.85,0.95,1.05,1.15}, denoiser weight ∈ {0.16,0.18,0.20,0.22}, MTF mode ∈ {gamma, combined}, 60 iters, scheduler + sigma adapt ON, DRUNet color on CUDA, limit=50 images.
+  - Monitor: `tail -f $HOME/mtf-smoke/admm-sweeps-mod50.log`. Stop with `pkill -f admm_sweep_modification.sh` if needed.
+
 ## Tips
 - Keep caches in `/tmp/$USER/...` to avoid quota issues in home.
 - If the lab has different GPU SKUs, change `--gres=gpu:rtx_4090:1` to the available type (e.g., `rtx_a6000`).

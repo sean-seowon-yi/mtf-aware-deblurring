@@ -13,7 +13,7 @@ class PhysicsContext:
     blur_length_px: float
     photon_budget: float
     mtf: np.ndarray
-    
+
     duty_cycle: float = 0.5
     read_noise_sigma: float = 0.0
     random_seed: int = 0
@@ -21,7 +21,7 @@ class PhysicsContext:
     psf: Optional[np.ndarray] = None
     kernel: Optional[np.ndarray] = None
     ssnr: Optional[np.ndarray] = None
-    
+
     scene_stats: Mapping[str, float] = field(default_factory=dict)
     blurred_stats: Mapping[str, float] = field(default_factory=dict) 
     noisy_stats: Mapping[str, float] = field(default_factory=dict)
