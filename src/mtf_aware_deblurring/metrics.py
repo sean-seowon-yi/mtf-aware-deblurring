@@ -3,6 +3,10 @@ from __future__ import annotations
 import numpy as np
 from numpy.fft import fft2, fftshift
 from scipy.ndimage import gaussian_filter
+import torch
+import torch.nn.functional as F
+
+_LPIPS_CACHE = {}
 
 
 def _spectral_snr_single(img_clean: np.ndarray, img_noisy: np.ndarray, eps: float) -> np.ndarray:
@@ -94,5 +98,53 @@ def ssim(
         return float(np.mean(scores))
     raise ValueError("ssim expects 2D or 3D inputs.")
 
+def lpips_distance(
+    reference: np.ndarray,
+    estimate: np.ndarray,
+    *,
+    device: str = "cpu",
+    net: str = "vgg",
+) -> float:
+    """
+    Learned Perceptual Image Patch Similarity (LPIPS).
 
-__all__ = ["spectral_snr", "psnr", "ssim"]
+    Uses the lpips package; caches the model per (device, net) to avoid reloads.
+    Expects inputs in [0, 1]; converts to [-1, 1] and RGB 3-channel for the metric.
+    """
+    try:
+        import lpips  # type: ignore
+    except ImportError as e:
+        raise RuntimeError("lpips is not installed. Please install lpips>=0.1.4.") from e
+
+    dev = torch.device(device)
+    key = (str(dev), net)
+    if key not in _LPIPS_CACHE:
+        model = lpips.LPIPS(net=net).to(dev)
+        model.eval()
+        _LPIPS_CACHE[key] = model
+    model = _LPIPS_CACHE[key]
+
+    def _prep(x: np.ndarray) -> torch.Tensor:
+        if x.ndim == 2:
+            x = x[..., None]
+        if x.shape[2] == 1:
+            x = np.repeat(x, 3, axis=2)
+        if x.shape[2] != 3:
+            raise ValueError("LPIPS expects 1-channel or 3-channel inputs.")
+        tensor = torch.from_numpy(x.astype(np.float32)).permute(2, 0, 1).unsqueeze(0)
+        tensor = tensor.to(dev)
+        tensor = tensor * 2.0 - 1.0  # normalize to [-1, 1]
+        return tensor
+
+    with torch.no_grad():
+        ref_t = _prep(reference)
+        est_t = _prep(estimate)
+        # Avoid extremely small inputs
+        min_size = 64
+        if ref_t.shape[-1] < min_size or ref_t.shape[-2] < min_size:
+            ref_t = F.interpolate(ref_t, size=(max(min_size, ref_t.shape[-2]), max(min_size, ref_t.shape[-1])), mode="bilinear", align_corners=False)
+            est_t = F.interpolate(est_t, size=ref_t.shape[-2:], mode="bilinear", align_corners=False)
+        score = model(ref_t, est_t).item()
+    return float(score)
+
+__all__ = ["spectral_snr", "psnr", "ssim", "lpips_distance"]

@@ -10,6 +10,7 @@ import imageio.v2 as imageio
 import numpy as np
 
 from .common import run_forward_batches
+from ..metrics import lpips_distance
 from ..reconstruction import (
     run_wiener_baseline,
     run_richardson_lucy_baseline,
@@ -33,6 +34,15 @@ def _serialize_args(args: argparse.Namespace) -> Dict[str, Any]:
         else:
             payload[key] = str(value)
     return payload
+
+def _resolve_lpips_device(choice: Optional[str]) -> str:
+    if choice and choice != "auto":
+        return choice
+    try:
+        import torch
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:
+        return "cpu"
 
 
 def parse_args(argv=None):
@@ -59,6 +69,13 @@ def parse_args(argv=None):
     g_data.add_argument("--save-recon", action="store_true", help="Save reconstructions as PNGs.")
     g_data.add_argument("--collect-only", action="store_true", help="Skip per-image folders; only write summary CSV.")
     g_data.add_argument("--enable-ssim", action="store_true", help="Also compute/log SSIM (default: PSNR only).")
+    g_data.add_argument("--enable-lpips", action="store_true", help="Also compute/log LPIPS (perceptual metric).")
+    g_data.add_argument(
+        "--lpips-device",
+        choices=["auto", "cpu", "cuda"],
+        default="auto",
+        help="Device for LPIPS computation (auto uses CUDA if available).",
+    )
     g_data.add_argument(
         "--log-traces",
         action="store_true",
@@ -364,6 +381,7 @@ def main(argv=None):
     persist_outputs = (not args.collect_only) or args.save_recon
     save_recon = args.save_recon
     method = args.method.lower()
+    lpips_device = _resolve_lpips_device(getattr(args, "lpips_device", None)) if getattr(args, "enable_lpips", False) else None
 
     try:
         for batch in run_forward_batches(args, baseline_name=method, persist_outputs=persist_outputs):
@@ -389,16 +407,20 @@ def main(argv=None):
                 }
                 if args.enable_ssim:
                     row["ssim"] = result.ssim
+                if args.enable_lpips:
+                    lpips_val = lpips_distance(batch.image, result.reconstruction, device=lpips_device or "cpu")
+                    result.lpips = lpips_val
+                    row["lpips"] = lpips_val
                 summaries.append(row)
 
                 # Console logging
+                parts = [f"PSNR: {result.psnr:.2f} dB"]
                 if args.enable_ssim:
-                    print(
-                        f"{batch.image_path.name} [{pattern}] "
-                        f"PSNR: {result.psnr:.2f} dB | SSIM: {result.ssim:.4f}"
-                    )
-                else:
-                    print(f"{batch.image_path.name} [{pattern}] PSNR: {result.psnr:.2f} dB")
+                    parts.append(f"SSIM: {result.ssim:.4f}")
+                if args.enable_lpips and result.lpips is not None:
+                    parts.append(f"LPIPS: {result.lpips:.4f}")
+                metrics_str = " | ".join(parts)
+                print(f"{batch.image_path.name} [{pattern}] {metrics_str}")
 
                 # Trace logging (ADMM denoiser)
                 if args.log_traces and result.trace:
@@ -410,6 +432,8 @@ def main(argv=None):
                         metrics_payload = {"psnr": result.psnr}
                         if args.enable_ssim:
                             metrics_payload["ssim"] = result.ssim
+                        if args.enable_lpips and result.lpips is not None:
+                            metrics_payload["lpips"] = result.lpips
 
                         trace_entry = {
                             "image": batch.image_path.name,
@@ -432,42 +456,37 @@ def main(argv=None):
     summaries.sort(key=lambda row: (row["image"], pattern_order.get(row["pattern"], len(pattern_order))))
 
     # CSV & aggregation
+    fieldnames = ["image", "pattern", "psnr"]
     if args.enable_ssim:
-        csv_path = baseline_root / f"{method}_metrics.csv"
-        with open(csv_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["image", "pattern", "psnr", "ssim"])
-            writer.writeheader()
-            writer.writerows(summaries)
-        print(f"Saved PSNR/SSIM summary to {csv_path}")
+        fieldnames.append("ssim")
+    if args.enable_lpips:
+        fieldnames.append("lpips")
 
-        avg_by_pattern: Dict[str, Dict[str, List[float]]] = {}
-        for row in summaries:
-            metrics = avg_by_pattern.setdefault(row["pattern"], {"psnr": [], "ssim": []})
-            metrics["psnr"].append(row["psnr"])
-            metrics["ssim"].append(row["ssim"])
+    csv_suffix = "_metrics.csv" if (args.enable_ssim or args.enable_lpips) else "_psnr.csv"
+    csv_path = baseline_root / f"{method}{csv_suffix}"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(summaries)
+    print(f"Saved metrics to {csv_path}")
 
-        for pattern, values in avg_by_pattern.items():
-            mean_psnr = sum(values["psnr"]) / len(values["psnr"])
-            mean_ssim = sum(values["ssim"]) / len(values["ssim"])
-            print(
-                f"Average {pattern}: "
-                f"PSNR {mean_psnr:.2f} dB | SSIM {mean_ssim:.4f} over {len(values['psnr'])} images"
-            )
-    else:
-        csv_path = baseline_root / f"{method}_psnr.csv"
-        with open(csv_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["image", "pattern", "psnr"])
-            writer.writeheader()
-            writer.writerows(summaries)
-        print(f"Saved PSNR summary to {csv_path}")
+    avg_by_pattern: Dict[str, Dict[str, List[float]]] = {}
+    for row in summaries:
+        metrics = avg_by_pattern.setdefault(row["pattern"], {})
+        for key in fieldnames:
+            if key in ("image", "pattern"):
+                continue
+            metrics.setdefault(key, []).append(row[key])
 
-        avg_by_pattern: Dict[str, List[float]] = {}
-        for row in summaries:
-            avg_by_pattern.setdefault(row["pattern"], []).append(row["psnr"])
-
-        for pattern, values in avg_by_pattern.items():
-            mean_val = sum(values) / len(values)
-            print(f"Average {pattern} PSNR: {mean_val:.2f} dB over {len(values)} images")
+    for pattern, values in avg_by_pattern.items():
+        parts = []
+        if "psnr" in values:
+            parts.append(f"PSNR {sum(values['psnr']) / len(values['psnr']):.2f} dB")
+        if "ssim" in values:
+            parts.append(f"SSIM {sum(values['ssim']) / len(values['ssim']):.4f}")
+        if "lpips" in values:
+            parts.append(f"LPIPS {sum(values['lpips']) / len(values['lpips']):.4f}")
+        print(f"Average {pattern}: " + " | ".join(parts) + f" over {len(values.get('psnr', []))} images")
 
 
 if __name__ == "__main__":

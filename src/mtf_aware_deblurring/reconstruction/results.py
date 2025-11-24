@@ -11,6 +11,7 @@ class ReconstructionResult:
     reconstruction: np.ndarray
     psnr: float
     ssim: float
+    lpips: Optional[float] = None
     trace: Optional[List[Dict[str, Any]]] = None
 
 

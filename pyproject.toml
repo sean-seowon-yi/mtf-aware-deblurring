@@ -20,7 +20,8 @@ dependencies = [
   "pillow>=9.0",
   "ipython>=8.0",
   "scipy>=1.10",
-  "torch>=2.2"
+  "torch>=2.2",
+  "lpips>=0.1.4"
 ]
 
 [project.urls]
