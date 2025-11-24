@@ -143,6 +143,12 @@ def parse_args(argv=None):
         action="store_true",
         help="Enable heuristic physics-aware scheduler to override rho/weight by iteration.",
     )
+    g_admm.add_argument(
+        "--admm-denoiser-interval",
+        type=int,
+        default=2,
+        help="Apply the ADMM denoiser every N iterations (1 applies it every iteration).",
+    )
 
     # --- 7. ADMM MTF / PHYSICS AWARENESS ---
     g_mtf = parser.add_argument_group("ADMM MTF / Physics Awareness")
@@ -300,13 +306,15 @@ def run_method(method: str, batch, args):
             denoiser_weights=args.denoiser_weights,
             denoiser_device=args.denoiser_device,
             denoiser_type=args.denoiser_type,
-            denoiser_sigma_scale=args.denoiser_sigma_scale,  # <--- Added
+            denoiser_sigma_scale=args.denoiser_sigma_scale,
+            # NEW: control how often the denoiser runs
+            denoiser_interval=args.admm_denoser_interval if hasattr(args, "admm_denoser_interval") else 2,
             # Scheduler
             scheduler=scheduler,
             pattern_contexts=batch.pattern_contexts,
             # MTF / Physics params
-            mtf_scale=args.admm_mtf_scale,           # 0.0 => heuristic
-            mtf_floor=args.admm_mtf_floor,           # 0.0 => heuristic
+            mtf_scale=args.admm_mtf_scale,
+            mtf_floor=args.admm_mtf_floor,
             mtf_weighting_mode=args.admm_mtf_weighting_mode,
             mtf_sigma_adapt=args.admm_mtf_sigma_adapt,
             # Advanced Wiener params
@@ -315,6 +323,7 @@ def run_method(method: str, batch, args):
             mtf_wiener_tau_min=args.admm_mtf_wiener_tau_min,
             mtf_wiener_tau_max=args.admm_mtf_wiener_tau_max,
         )
+
 
     if method == "admm_diffusion":
         return run_admm_diffusion_baseline(
