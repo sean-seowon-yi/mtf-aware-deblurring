@@ -308,7 +308,7 @@ def run_method(method: str, batch, args):
             denoiser_type=args.denoiser_type,
             denoiser_sigma_scale=args.denoiser_sigma_scale,
             # NEW: control how often the denoiser runs
-            denoiser_interval=args.admm_denoser_interval if hasattr(args, "admm_denoser_interval") else 2,
+            denoiser_interval=args.admm_denoiser_interval if hasattr(args, "admm_denoiser_interval") else 2,
             # Scheduler
             scheduler=scheduler,
             pattern_contexts=batch.pattern_contexts,
