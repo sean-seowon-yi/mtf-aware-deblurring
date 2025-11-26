@@ -69,3 +69,31 @@ These numbers reflect a lightly trained TinyScoreUNet (3 epochs). Expect major g
 - Start with `--denoiser-type tiny` or `unet` for production-quality ADMM results; bring in DnCNN when sweeping ADAM hyper-parameters.
 - Train the UNet and TinyScoreUNet on the same noise statistics (photon budget, read noise) you plan to simulate.
 - For AMD hardware, install `torch-directml` inside a dedicated conda environment (see README) and use `--denoiser-device dml` / `--diffusion-device dml`.
+
+## Physics-Aware Sweep (RGB DIV2K/X2, 10 Images)
+
+To tune the physics-aware knobs we swept `rho` and `denoiser_weight` with the scheduler, combined MTF weighting, and sigma adaptation on RGB DIV2K/X2 (first 10 train images, patterns box/random/legendre). Command template:
+```bash
+python -m mtf_aware_deblurring.pipelines.reconstruct \
+  --div2k-root $HOME/datasets/DIV2K --subset train --degradation bicubic --scale X2 \
+  --image-mode rgb --limit 10 --auto-download \
+  --patterns box random legendre \
+  --method admm \
+  --admm-iters 60 \
+  --admm-rho <rho> \
+  --admm-denoiser-weight <weight> \
+  --admm-mtf-weighting-mode combined \
+  --admm-mtf-sigma-adapt \
+  --use-physics-scheduler \
+  --denoiser-type drunet_color \
+  --denoiser-device cuda \
+  --collect-only --enable-ssim
+```
+
+Top settings (PSNR averages, 10 images):
+- **rho=1.04, weight=0.16** — box 25.34 dB, random 28.43 dB, legendre **29.38 dB** (best observed).
+- rho=1.02, weight=0.16 — box 25.36 dB, random 28.42 dB, legendre 29.38 dB (tied within noise).
+- rho=1.00, weight=0.16 — box 25.38 dB, random 28.41 dB, legendre 29.37 dB.
+- rho=1.02, weight=0.15 — box 25.42 dB, random 28.06 dB, legendre 29.35 dB.
+
+Recommendation: use rho≈1.04 and denoiser weight≈0.16 for physics-aware ADMM with DRUNet; nearby values (1.00–1.02, 0.15–0.16) are essentially tied. Keep `--admm-mtf-weighting-mode combined` and `--admm-mtf-sigma-adapt` enabled when using the scheduler.

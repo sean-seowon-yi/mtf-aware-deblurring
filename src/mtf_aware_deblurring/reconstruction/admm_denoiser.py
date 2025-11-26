@@ -27,8 +27,8 @@ _DEFAULT_DIFFUSION_CONFIG = DiffusionPriorConfig()
 # --- Heuristics / thresholds for optics quality and MTF cutoff ---
 # These are deliberately mild; you can tune them per dataset.
 _Q_FALLBACK_THRESHOLD = 0.0        # if >0, very poor optics fall back to pure denoising
-_MTF_CUTOFF_BASE = 0.0             # soft cutoff when optics are decent
-_MTF_CUTOFF_HARD = 0.0             # stronger cutoff when optics are bad
+_MTF_CUTOFF_BASE = 0.01            # soft cutoff when optics are decent
+_MTF_CUTOFF_HARD = 0.02            # stronger cutoff when optics are bad
 
 
 class ProximalCallable(Protocol):
