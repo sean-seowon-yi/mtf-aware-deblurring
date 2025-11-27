@@ -16,7 +16,6 @@ from ..reconstruction import (
     run_richardson_lucy_baseline,
     run_adam_denoiser_baseline,
     run_admm_denoiser_baseline,
-    run_admm_diffusion_baseline,
     AdaptivePhysicsScheduler,
 )
 
@@ -102,7 +101,7 @@ def parse_args(argv=None):
     g_method = parser.add_argument_group("Reconstruction Method Selection")
     g_method.add_argument(
         "--method",
-        choices=["wiener", "rl", "adam", "admm", "admm_diffusion"],
+        choices=["wiener", "rl", "adam", "admm"],
         default="wiener",
         help="Reconstruction algorithm to run.",
     )
@@ -198,8 +197,8 @@ def parse_args(argv=None):
     g_mtf.add_argument("--admm-mtf-wiener-tau-min", type=float, default=1e-4, help="[Adv] Tau min.")
     g_mtf.add_argument("--admm-mtf-wiener-tau-max", type=float, default=1e-1, help="[Adv] Tau max.")
 
-    # --- 8. PRIOR CONFIGURATION (DENOISER / DIFFUSION) ---
-    g_prior = parser.add_argument_group("Denoiser / Diffusion Prior")
+    # --- 8. PRIOR CONFIGURATION (DENOISER) ---
+    g_prior = parser.add_argument_group("Denoiser Prior")
     g_prior.add_argument(
         "--denoiser-type",
         choices=["tiny", "dncnn", "unet", "drunet_color", "drunet_gray"],
@@ -221,41 +220,6 @@ def parse_args(argv=None):
         type=float,
         default=8.0,
         help="Scaling factor for sigma passed to denoiser (Default 8.0, try 2.0 for sharpness).",
-    )
-
-    # Diffusion-specific
-    g_prior.add_argument(
-        "--diffusion-prior-type",
-        choices=["tiny_score"],
-        default="tiny_score",
-        help="Score model backbone for the diffusion prior.",
-    )
-    g_prior.add_argument("--diffusion-prior-weights", type=Path, help="Path to diffusion score-model weights (.pth).")
-    g_prior.add_argument("--diffusion-steps", type=int, default=12, help="Diffusion-score steps per ADMM iteration.")
-    g_prior.add_argument(
-        "--diffusion-guidance",
-        type=float,
-        default=1.0,
-        help="Guidance scale for the diffusion proximal operator.",
-    )
-    g_prior.add_argument(
-        "--diffusion-noise-scale",
-        type=float,
-        default=1.0,
-        help="Initial noise scale injected before diffusion refinement.",
-    )
-    g_prior.add_argument("--diffusion-sigma-min", type=float, default=0.01, help="Minimum sigma for diffusion schedule.")
-    g_prior.add_argument("--diffusion-sigma-max", type=float, default=0.5, help="Maximum sigma for diffusion schedule.")
-    g_prior.add_argument(
-        "--diffusion-schedule",
-        choices=["geom", "linear"],
-        default="geom",
-        help="Sigma schedule type for the diffusion prior.",
-    )
-    g_prior.add_argument(
-        "--diffusion-device",
-        choices=["cpu", "cuda", "dml"],
-        help="Force device for the diffusion prior (defaults to auto).",
     )
 
     return parser.parse_args(argv)
@@ -339,24 +303,6 @@ def run_method(method: str, batch, args):
             mtf_wiener_floor=args.admm_mtf_wiener_floor,
             mtf_wiener_tau_min=args.admm_mtf_wiener_tau_min,
             mtf_wiener_tau_max=args.admm_mtf_wiener_tau_max,
-        )
-
-
-    if method == "admm_diffusion":
-        return run_admm_diffusion_baseline(
-            batch.image,
-            batch.forward_outputs["patterns"],  # type: ignore[index]
-            iterations=args.admm_iters,
-            rho=args.admm_rho,
-            diffusion_prior_type=args.diffusion_prior_type,
-            diffusion_prior_weights=args.diffusion_prior_weights,
-            diffusion_steps=args.diffusion_steps,
-            diffusion_guidance=args.diffusion_guidance,
-            diffusion_noise_scale=args.diffusion_noise_scale,
-            diffusion_sigma_min=args.diffusion_sigma_min,
-            diffusion_sigma_max=args.diffusion_sigma_max,
-            diffusion_schedule=args.diffusion_schedule,
-            diffusion_device=args.diffusion_device,
         )
 
     raise ValueError(f"Unsupported method: {method}")

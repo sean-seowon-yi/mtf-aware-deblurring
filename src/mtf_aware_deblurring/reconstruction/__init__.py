@@ -5,8 +5,6 @@ from .adam_denoiser import adam_denoiser_deconvolution, run_adam_denoiser_baseli
 from .admm_denoiser import (
     admm_denoiser_deconvolution,
     run_admm_denoiser_baseline,
-    admm_diffusion_deconvolution,
-    run_admm_diffusion_baseline,
 )
 from .prior_scheduler import (
     PhysicsContext,
@@ -28,8 +26,6 @@ __all__ = [
     "run_adam_denoiser_baseline",
     "admm_denoiser_deconvolution",
     "run_admm_denoiser_baseline",
-    "admm_diffusion_deconvolution",
-    "run_admm_diffusion_baseline",
     "PhysicsContext",
     "PhysicsAwareScheduler",
     "AdaptivePhysicsScheduler", # <--- Updated in __all__

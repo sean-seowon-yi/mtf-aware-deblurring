@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Dict, Literal, Optional, Protocol, TypedDict
+from typing import Any, Callable, Dict, Optional, Protocol, TypedDict
 
 import numpy as np
 from numpy.fft import fft2, ifft2, ifftshift
 
 # --- Internal Imports ---
 from ..denoisers import build_denoiser
-from ..diffusion import DiffusionPrior, DiffusionPriorConfig, build_diffusion_prior
 from ..metrics import psnr, ssim
 from ..optics import pad_to_shape
 from .results import ReconstructionResult
@@ -21,8 +20,6 @@ from .mtf_utils import (
     infer_tau_from_observation,
     mtf_quality_from_kernel,
 )
-
-_DEFAULT_DIFFUSION_CONFIG = DiffusionPriorConfig()
 
 # --- Heuristics / thresholds for optics quality and MTF cutoff ---
 # These are deliberately mild; you can tune them per dataset.
@@ -531,146 +528,7 @@ def run_admm_denoiser_baseline(
     return outputs
 
 
-# --- Diffusion Wrappers (unchanged behaviour, just formatted) ---
-
-
-def admm_diffusion_deconvolution(
-    observation: np.ndarray,
-    kernel: np.ndarray,
-    *,
-    iterations: int = 40,
-    rho: float = 0.6,
-    diffusion_prior: Optional[DiffusionPrior] = None,
-    diffusion_prior_type: str = "tiny_score",
-    diffusion_prior_weights: Optional[Path] = None,
-    diffusion_steps: Optional[int] = None,
-    diffusion_guidance: Optional[float] = None,
-    diffusion_noise_scale: Optional[float] = None,
-    diffusion_sigma_min: float = 0.01,
-    diffusion_sigma_max: float = 0.5,
-    diffusion_schedule: Literal["geom", "linear"] = "geom",
-    diffusion_device: Optional[str] = None,
-    callback: Optional[Callable[[int, float], None]] = None,
-) -> np.ndarray:
-    obs = np.asarray(observation, dtype=np.float32)
-    if diffusion_prior is None:
-        base = _DEFAULT_DIFFUSION_CONFIG
-        cfg = DiffusionPriorConfig(
-            steps=diffusion_steps or base.steps,
-            sigma_min=diffusion_sigma_min,
-            sigma_max=diffusion_sigma_max,
-            schedule=diffusion_schedule,
-            guidance=diffusion_guidance or base.guidance,
-            noise_scale=diffusion_noise_scale or base.noise_scale,
-        )
-        channels = 1 if obs.ndim == 2 else obs.shape[2]
-        diffusion_prior = build_diffusion_prior(
-            diffusion_prior_type,
-            weights_path=diffusion_prior_weights,
-            device=diffusion_device or "cpu",
-            config=cfg,
-            in_channels=channels,
-        )
-    else:
-        if diffusion_steps is not None:
-            diffusion_prior.update_schedule(diffusion_steps)
-    diffusion_prior.update_schedule(iterations)
-
-    def diff_prox(image: np.ndarray, sigma: float) -> np.ndarray:
-        return diffusion_prior.proximal(
-            image,
-            rho=rho,
-            guidance=diffusion_guidance,
-            noise_scale=diffusion_noise_scale,
-        )
-
-    return _core_pnp_admm(
-        obs,
-        kernel,
-        prox_operator=diff_prox,
-        iterations=iterations,
-        rho=rho,
-        prior_weight=1.0,
-        mtf_weights=None,
-        sigma_multiplier=1.0,
-        denoiser_interval=1,
-        scheduler=None,
-        pattern_name=None,
-        callback=callback,
-        trace=None,
-        use_internal_ramp=False,
-        # diffusion prior is already strong; turn off early-stop here by default
-        tol_primal=0.0,
-        tol_dual=0.0,
-    )
-
-
-def run_admm_diffusion_baseline(
-    scene: np.ndarray,
-    forward_results: Dict[str, Dict[str, np.ndarray]],
-    *,
-    iterations: int = 40,
-    rho: float = 0.6,
-    diffusion_prior_type: str = "tiny_score",
-    diffusion_prior_weights: Optional[Path] = None,
-    diffusion_steps: Optional[int] = None,
-    diffusion_guidance: Optional[float] = None,
-    diffusion_noise_scale: Optional[float] = None,
-    diffusion_sigma_min: float = 0.01,
-    diffusion_sigma_max: float = 0.5,
-    diffusion_schedule: Literal["geom", "linear"] = "geom",
-    diffusion_device: Optional[str] = None,
-) -> Dict[str, ReconstructionResult]:
-    base = _DEFAULT_DIFFUSION_CONFIG
-    cfg = DiffusionPriorConfig(
-        steps=diffusion_steps or base.steps,
-        sigma_min=diffusion_sigma_min,
-        sigma_max=diffusion_sigma_max,
-        schedule=diffusion_schedule,
-        guidance=diffusion_guidance or base.guidance,
-        noise_scale=diffusion_noise_scale or base.noise_scale,
-    )
-    obs_shape = next(iter(forward_results.values()))["noisy"].shape
-    prior = build_diffusion_prior(
-        diffusion_prior_type,
-        weights_path=diffusion_prior_weights,
-        device=diffusion_device or "cpu",
-        config=cfg,
-        in_channels=1 if len(obs_shape) == 2 else obs_shape[2],
-    )
-    prior.update_schedule(iterations)
-
-    outputs: Dict[str, ReconstructionResult] = {}
-    for pattern, data in forward_results.items():
-        recon = admm_diffusion_deconvolution(
-            data["noisy"],
-            data["kernel"],
-            iterations=iterations,
-            rho=rho,
-            diffusion_prior=prior,
-            diffusion_prior_type=diffusion_prior_type,
-            diffusion_prior_weights=diffusion_prior_weights,
-            diffusion_steps=diffusion_steps,
-            diffusion_guidance=diffusion_guidance,
-            diffusion_noise_scale=diffusion_noise_scale,
-            diffusion_sigma_min=diffusion_sigma_min,
-            diffusion_sigma_max=diffusion_sigma_max,
-            diffusion_schedule=diffusion_schedule,
-            diffusion_device=diffusion_device,
-        )
-        outputs[pattern] = ReconstructionResult(
-            reconstruction=recon,
-            psnr=psnr(scene, recon),
-            ssim=ssim(scene, recon),
-            trace=None,
-        )
-
-    return outputs
-
-
 __all__ = [
     "admm_denoiser_deconvolution",
-    "admm_diffusion_deconvolution",
     "run_admm_denoiser_baseline",
-    "run_admm_diffusion_baseline",
 ]
