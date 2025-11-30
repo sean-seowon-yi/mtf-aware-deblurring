@@ -105,6 +105,23 @@ Takeaways: default to no MTF mask; keep scheduler ON; sigma adapt optional; DRUN
 
 ---
 
+## Unrolled branch (new work, learnable physics-aware pipeline)
+- **Goal:** Replace hand-tuned physics heuristics (rho ramp, denoiser weight, sigma multiplier, MTF mask) with learnable, differentiable parameters trained on the same forward-model dataset. Keep physics priors (FFT data-consistency, MTF weighting) explicit and learn only the schedules/masks.
+- **Code:** Torch-native unrolled module at `src/mtf_aware_deblurring/reconstruction/unrolled_admm.py` (`UnrolledADMM`, `UnrolledADMMConfig`). Learnable per-step `{rho, denoiser_weight, sigma_mult}` with optional context-conditioned deltas, optional learnable MTF trust mask (gamma/floor/cutoff), denoise gating, and per-step traces for debugging.
+- **Training entrypoint:** `scripts/train_unrolled.py` generates blurred/noisy pairs on-the-fly from DIV2K via the existing forward model and trains the unrolled model end-to-end with an UNet denoiser backbone. Context features = blur_length_px, taps, photon_budget, optics_score, snr_score.
+- **Usage (smoke):**
+  ```
+  python scripts/train_unrolled.py \
+    --div2k-root data --subset train --degradation bicubic --scale X2 \
+    --image-mode grayscale --limit 4 --target-size 256 \
+    --patterns box random legendre --taps 31 --blur-length 15 --photon-budget 1000 \
+    --steps 8 --epochs 1 --batch-size 1 --lr 1e-4 --mtf-mask --device cuda
+  ```
+  This uses on-the-fly forward synthesis (no saved arrays) and a frozen UNet denoiser. Increase `--limit`/`--epochs` for real training; bump `--steps` to 12 for deeper unrolls.
+- **Next steps:** (1) swap the frozen UNet for DRUNet/Tiny if/when a differentiable adapter is wired; (2) add SSIM/perceptual losses for sharper recon; (3) cache forward-model outputs for faster epochs; (4) extend the context head to emit per-step deltas for denoise gating or mask parameters if more adaptivity is needed.
+
+---
+
 ## Code change trace (high impact diffs)
 - `reconstruction/admm_denoiser.py`: refactored to `_core_pnp_admm`; weighted x-update; prox sigma honored; MTF mask handling normalized; sigma multiplier logging.
 - `reconstruction/prior_scheduler.py`: AdaptivePhysicsScheduler replaces heuristic scheduler; optics/SNR scoring; geometric rho ramp; weight modulation.

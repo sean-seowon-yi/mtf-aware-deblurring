@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="${REPO:-$HOME/mtf-aware-deblurring}"
-DIV2K_ROOT="${DIV2K_ROOT:-$HOME/datasets/DIV2K}"
+DIV2K_ROOT="${DIV2K_ROOT:-$REPO/data}"
 OUT_ROOT="${OUT_ROOT:-$HOME/mtf-smoke/admm-sweeps}"
 LIMIT="${LIMIT:-1}"
 VENV="${VENV:-/tmp/$USER/envs/CSC2529}"

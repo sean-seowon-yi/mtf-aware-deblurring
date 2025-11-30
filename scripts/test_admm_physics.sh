@@ -11,7 +11,7 @@ set -euo pipefail
 
 # ------------- configurable paths -------------
 REPO="${REPO:-$HOME/mtf-aware-deblurring}"
-DATA_ROOT="${DATA_ROOT:-$HOME/datasets/DIV2K}"
+DATA_ROOT="${DATA_ROOT:-$REPO/data}"
 OUT_DIR="${OUT_DIR:-$HOME/mtf-smoke/admm-physics}"
 VENV_DIR="${VENV_DIR:-/tmp/$USER/envs/CSC2529}"
 PIP_CACHE="${PIP_CACHE:-/tmp/$USER/pip-cache}"

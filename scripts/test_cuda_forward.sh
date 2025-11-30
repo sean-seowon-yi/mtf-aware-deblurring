@@ -10,8 +10,9 @@
 set -euo pipefail
 
 # --- config you might tweak ---
+REPO="${REPO:-$HOME/mtf-aware-deblurring}"
 VENV_PATH="${VENV_PATH:-/tmp/$USER/envs/CSC2529}"   # or e.g., ~/envs/mtf if you keep a persistent one
-DATA_ROOT="${DATA_ROOT:-$HOME/datasets/DIV2K}"
+DATA_ROOT="${DATA_ROOT:-$REPO/data}"
 OUT_DIR="${OUT_DIR:-$HOME/mtf-smoke/admm}"
 DENOISER_TYPE="${DENOISER_TYPE:-tiny}"
 DENOISER_DEVICE="${DENOISER_DEVICE:-cuda}"
@@ -23,7 +24,7 @@ mkdir -p "$(dirname "$OUT_DIR")" logs
 source "$VENV_PATH/bin/activate"
 
 # Run the pipeline (CUDA on proximal + denoiser)
-cd "$HOME/mtf-aware-deblurring"
+cd "$REPO"
 
 python -m mtf_aware_deblurring.pipelines.reconstruct \
   --div2k-root "$DATA_ROOT" \

@@ -6,7 +6,8 @@
 
 set -euo pipefail
 
-DIV2K_ROOT="${DIV2K_ROOT:-$HOME/datasets/DIV2K}"
+REPO="${REPO:-$HOME/mtf-aware-deblurring}"
+DIV2K_ROOT="${DIV2K_ROOT:-$REPO/data}"
 PATTERNS="${PATTERNS:-box random legendre}"
 LIMIT="${LIMIT:-3}"
 ADMM_ITERS="${ADMM_ITERS:-60}"

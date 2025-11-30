@@ -12,6 +12,7 @@ from .prior_scheduler import (
     AdaptivePhysicsScheduler,  # <--- Updated: Replaced Heuristic with Adaptive
     SchedulerDecision,
 )
+from .unrolled_admm import UnrolledADMM, UnrolledADMMConfig
 
 WienerResult = ReconstructionResult
 
@@ -30,4 +31,6 @@ __all__ = [
     "PhysicsAwareScheduler",
     "AdaptivePhysicsScheduler", # <--- Updated in __all__
     "SchedulerDecision",
+    "UnrolledADMM",
+    "UnrolledADMMConfig",
 ]

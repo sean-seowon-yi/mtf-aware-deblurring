@@ -46,7 +46,7 @@ Legacy note: the diffusion-based ADMM variant has been removed from the CLI and 
 To tune the physics-aware knobs we swept `rho` and `denoiser_weight` with the scheduler, combined MTF weighting, and sigma adaptation on RGB DIV2K/X2 (first 10 train images, patterns box/random/legendre). Command template:
 ```bash
 python -m mtf_aware_deblurring.pipelines.reconstruct \
-  --div2k-root $HOME/datasets/DIV2K --subset train --degradation bicubic --scale X2 \
+  --div2k-root data --subset train --degradation bicubic --scale X2 \
   --image-mode rgb --limit 10 --auto-download \
   --patterns box random legendre \
   --method admm \

@@ -30,7 +30,7 @@
 ## Submit a batch GPU job
 - Use the provided Slurm script: `scripts/test_admm_physics.sh`
   - It installs the project in editable mode inside a venv at `/tmp/$USER/envs/CSC2529` and uses a pip cache at `/tmp/$USER/pip-cache` to stay under home quota.
-  - Defaults: dataset at `$HOME/datasets/DIV2K`, output at `$HOME/mtf-smoke/admm-physics`.
+  - Defaults: dataset under `data/` in the repo, output at `$HOME/mtf-smoke/admm-physics`.
   - Submit with optional overrides (example runs 1 image):
     ```
     cd ~/mtf-aware-deblurring
@@ -49,7 +49,7 @@
   pip install --no-cache-dir -e .
 
   python -m mtf_aware_deblurring.pipelines.reconstruct \
-    --div2k-root $HOME/datasets/DIV2K \
+    --div2k-root data \
     --subset train \
     --degradation bicubic \
     --scale X2 \

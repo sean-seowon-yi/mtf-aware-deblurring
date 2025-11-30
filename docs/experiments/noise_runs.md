@@ -15,7 +15,7 @@ Replace the noise block with the desired setting. All runs use CUDA for denoiser
 **RL tuned (tweaked damping/smoothing)**
 ```bash
 python -m mtf_aware_deblurring.pipelines.reconstruct \
-  --div2k-root $HOME/datasets/DIV2K --subset train --degradation bicubic --scale X2 \
+  --div2k-root data --subset train --degradation bicubic --scale X2 \
   --image-mode rgb --limit 0 --auto-download \
   --patterns box random legendre \
   --method rl \
@@ -29,7 +29,7 @@ python -m mtf_aware_deblurring.pipelines.reconstruct \
 **ADAM + DnCNN (noise2 weight bumped to 0.30)**
 ```bash
 python -m mtf_aware_deblurring.pipelines.reconstruct \
-  --div2k-root $HOME/datasets/DIV2K --subset train --degradation bicubic --scale X2 \
+  --div2k-root data --subset train --degradation bicubic --scale X2 \
   --image-mode rgb --limit 0 --auto-download \
   --patterns box random legendre \
   --method adam \
@@ -44,7 +44,7 @@ python -m mtf_aware_deblurring.pipelines.reconstruct \
 **ADMM vanilla + DRUNet**
 ```bash
 python -m mtf_aware_deblurring.pipelines.reconstruct \
-  --div2k-root $HOME/datasets/DIV2K --subset train --degradation bicubic --scale X2 \
+  --div2k-root data --subset train --degradation bicubic --scale X2 \
   --image-mode rgb --limit 0 --auto-download \
   --patterns box random legendre \
   --method admm \
@@ -61,7 +61,7 @@ For the tuned single-image probe on noise2 we also tried ρ≈1.0–1.2, weight�
 **ADMM physics-aware + DRUNet**
 ```bash
 python -m mtf_aware_deblurring.pipelines.reconstruct \
-  --div2k-root $HOME/datasets/DIV2K --subset train --degradation bicubic --scale X2 \
+  --div2k-root data --subset train --degradation bicubic --scale X2 \
   --image-mode rgb --limit 0 --auto-download \
   --patterns box random legendre \
   --method admm \

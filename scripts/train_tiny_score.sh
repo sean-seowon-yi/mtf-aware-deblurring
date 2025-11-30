@@ -11,7 +11,7 @@ set -euo pipefail
 
 # ---------- config (override at submit time) ----------
 REPO="${REPO:-$HOME/mtf-aware-deblurring}"
-DATA_ROOT="${DATA_ROOT:-$HOME/datasets/DIV2K/DIV2K_train_LR_bicubic/X2}"
+DATA_ROOT="${DATA_ROOT:-$REPO/data/DIV2K_train_LR_bicubic/X2}"
 CKPT_OUT="${CKPT_OUT:-$REPO/src/mtf_aware_deblurring/assets/tiny_score_unet.pth}"
 
 EPOCHS="${EPOCHS:-50}"
