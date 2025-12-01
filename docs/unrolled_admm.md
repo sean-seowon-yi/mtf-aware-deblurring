@@ -76,6 +76,15 @@ Forward model settings: blur=15, taps=31, photon=1000, read_noise=0.01, RGB, tar
   - random: PSNR 27.19 dB | SSIM 0.7892 | LPIPS 0.2933
   - legendre: PSNR 27.15 dB | SSIM 0.7866 | LPIPS 0.3104
 
+## Full DIV2K sweep (800 RGB images)
+Forward model settings match training: blur=15, taps=31, photon=1000, read_noise=0.01, RGB, target_size=256. Command: `run_unrolled_full.slurm` invoking `--method unrolled --unrolled-checkpoint checkpoints/full_run_21482/unrolled_best.pt` with LPIPS/SSIM enabled and `--collect-only`.
+
+- Averages (PSNR / SSIM / LPIPS):
+  - box: 25.86 dB | 0.7799 | 0.3245
+  - random: 27.96 dB | 0.8461 | 0.2442
+  - legendre: 28.13 dB | 0.8518 | 0.2397
+- Metrics CSV: `/u/yazdinip/mtf-smoke/unrolled-full/unrolled_metrics.csv` (per-image rows for 0001x2–0800x2 across all patterns).
+
 Notes on comparisons:
 - Forward samples differ slightly if patterns are generated separately vs jointly; RNG differences can make one pattern “easier.” Fix seeds/pattern selection or reuse the same forward arrays for apples-to-apples comparisons.
 - The unrolled model matches or beats the baseline on box/random; legendre is comparable in these tests. Overall gains are modest because the forward model matches training conditions closely and the denoiser is strong.
