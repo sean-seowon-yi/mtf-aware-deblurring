@@ -28,4 +28,17 @@ outputs
 *.csv
 
 # Report workspace
-report/
+# report/
+
+# LaTeX
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+*.pdf

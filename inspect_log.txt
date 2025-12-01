@@ -1,0 +1,6 @@
+Noisy image not found: report\verification\noise1_rl_debug\0001x2\y_box_noisy.png
+Recon Shape: (256, 256, 3)
+Recon Min: 0, Max: 255, Mean: 130.6990712483724
+Kernel Shape: (1, 15)
+Kernel Sum: 0.9999999999999996
+Kernel Min: 0.06451612903225806, Max: 0.0967741935483871

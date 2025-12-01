@@ -10,8 +10,8 @@ def pad_to_shape(arr: np.ndarray, shape: Tuple[int, int]) -> np.ndarray:
     H, W = shape
     h, w = arr.shape
     out = np.zeros((H, W), dtype=arr.dtype)
-    y0 = (H - h) // 2
-    x0 = (W - w) // 2
+    y0 = H // 2 - h // 2
+    x0 = W // 2 - w // 2
     out[y0 : y0 + h, x0 : x0 + w] = arr
     return out
 

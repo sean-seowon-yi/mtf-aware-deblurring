@@ -18,7 +18,7 @@ from ..torch_utils import resolve_device
 class TinyDenoiserNet(nn.Module if nn is not None else object):
     """Lightweight residual CNN denoiser trained on DIV2K patches."""
 
-    def __init__(self, channels: int = 3, features: int = 64, depth: int = 8) -> None:
+    def __init__(self, channels: int = 3, features: int = 64, depth: int = 10) -> None:
         if nn is None:
             raise ImportError("PyTorch is required to instantiate TinyDenoiserNet.")
         super().__init__()
