@@ -98,6 +98,7 @@ python -m mtf_aware_deblurring.pipelines.reconstruct \
 | ADMM physics-aware + DRUNet | iters 80, ρ 2.0, w 0.32, MTF combined/sigma-adapt/scheduler, MTF floor 0.2 | 20.7881 / 0.5406 / 0.5387 | 23.5913 / 0.6749 / 0.4216 | 24.0392 / 0.6925 / 0.4090 | |
 | ADMM vanilla + DRUNet | iters 80, ρ 0.6, w 0.6 | 10.4316 / 0.1389 / 0.7245 | 13.4760 / 0.2103 / 0.6594 | 13.5670 / 0.2128 / 0.6556 | |
 | ADMM vanilla + DRUNet (tuned) | iters 80, ρ 1.0, w 1.1 | 21.6900 / 0.5640 / 0.5182 | 14.4938 / 0.2550 / 0.6302 | 14.4321 / 0.2511 / 0.6311 | Single-image CPU probes suggest ρ≈1.2, w≈1.0–1.1 are best among vanilla variants tried. |
+| Unrolled (learned weights) | steps 24, batch 2, denoise_every 4, lr 1e-4; checkpoint `full_run_21482/unrolled_best.pt`; blur 30, read 0.05, taps 31 | 18.52 / 0.3762 / 0.5839 | 20.16 / 0.4764 / 0.5225 | 20.44 / 0.4846 / 0.5177 | Full DIV2K/X2 train (800 imgs), RGB, collect-only. |
 
 Missing/unfinished: no noise2 runs for Adam + DRUNet or ADMM physics-aware + DnCNN.
 
