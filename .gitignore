@@ -22,3 +22,7 @@ data/
 .venv
 *.out
 outputs
+*.slurm
+*.err
+*.png
+*.csv

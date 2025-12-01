@@ -80,6 +80,23 @@
   - Defaults: rho ∈ {0.75,0.85,0.95,1.05,1.15}, denoiser weight ∈ {0.16,0.18,0.20,0.22}, MTF mode ∈ {gamma, combined}, 60 iters, scheduler + sigma adapt ON, DRUNet color on CUDA, limit=50 images.
   - Monitor: `tail -f $HOME/mtf-smoke/admm-sweeps-mod50.log`. Stop with `pkill -f admm_sweep_modification.sh` if needed.
 
+## Train the learnable unrolled ADMM model
+- The latest commit adds `scripts/train_unrolled.py`, which generates blurred/noisy pairs on-the-fly and trains a learnable per-iteration `{rho, weight, sigma_mult}` schedule with an optional learned MTF mask.
+- Minimal CUDA smoke (keeps runtime short; bump `--limit`/`--epochs`/`--steps` for real training):
+  ```
+  cd ~/mtf-aware-deblurring
+  source /tmp/$USER/envs/CSC2529/bin/activate
+  python scripts/train_unrolled.py \
+    --div2k-root data --subset train --degradation bicubic --scale X2 \
+    --image-mode grayscale --limit 4 --target-size 256 \
+    --patterns box random legendre --taps 31 --blur-length 15 --duty-cycle 0.5 \
+    --photon-budget 1000 --read-noise 0.01 \
+    --steps 8 --epochs 1 --batch-size 1 --lr 1e-4 \
+    --denoise-every 1 --mtf-mask --device cuda \
+    --checkpoint-dir $HOME/mtf-smoke/unrolled-smoke
+  ```
+- Checkpoints `unrolled_latest.pt` / `unrolled_best.pt` land in `--checkpoint-dir` and include optimizer state for resuming.
+
 ## Tips
 - Keep caches in `/tmp/$USER/...` to avoid quota issues in home.
 - If the lab has different GPU SKUs, change `--gres=gpu:rtx_4090:1` to the available type (e.g., `rtx_a6000`).

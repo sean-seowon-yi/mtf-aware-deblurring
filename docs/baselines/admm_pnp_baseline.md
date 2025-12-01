@@ -1,5 +1,7 @@
 # ADMM Plug-and-Play Baselines
 
+> Looking for the new learnable version? See `docs/unrolled_admm.md` for the unrolled ADMM/PnP module added in the latest commit.
+
 ## Experimental Setup
 
 - **Dataset**: `DIV2K_train_LR_bicubic/X2`, grayscale 128×128 crops (first five training frames for the smoke test below). The full RGB sweep uses the same settings as the ADAM baseline (blur length 15 px, `T=31`, duty cycle 0.5, photon budget 1000, read-noise 0.01).

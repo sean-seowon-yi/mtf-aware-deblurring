@@ -17,12 +17,13 @@ A research-grade toolkit for coded-exposure motion-blur simulation, physics-awar
 - **Baselines**:
   - Reusable Wiener + Richardson-Lucy algorithms live under `reconstruction/`.
   - `pipelines/reconstruct.py` orchestrates ADAM, ADMM (denoiser), and shared batching/CSV/reporting.
-  - Plug-and-play solvers support multiple priors: the bundled TinyDenoiser, a converted DnCNN sigma=15 model, a UNet denoiser trained via scripts/train_unet_denoiser.py, and pretrained DRUNet color/gray backbones sourced from DPIR.
+  - Plug-and-play solvers support multiple priors: the bundled TinyDenoiser, a converted DnCNN sigma=15 model, a UNet denoiser trained via `scripts/train_unet_denoiser.py`, and pretrained DRUNet color/gray backbones sourced from DPIR.
+  - Learnable unrolled ADMM/PnP module (`reconstruction/unrolled_admm.py`) with per-iteration `{rho, denoiser_weight, sigma_mult}` and an optional learned MTF trust mask. Train end-to-end via `scripts/train_unrolled.py`.
 - **Device-aware training/runtime**:
   - `torch_utils.resolve_device` lets every CLI flag accept `cpu`, `cuda`, or `dml` (DirectML) so you can target NVIDIA GPUs, AMD GPUs, or CPU-only runs without code changes.
   - Training scripts (`scripts/train_*`) detect the same device flag, making it straightforward to fine-tune priors on NVIDIA (CUDA) or AMD (DirectML/ROCm) hardware.
 - **Documentation**:
-  - Proposal summary, forward-model overview, and a growing `docs/baselines/` section with qualitative/quantitative evidence (e.g., `wiener_baseline.md`, `rl_baseline.md`, `adam_denoiser_baseline.md`).
+  - Proposal summary, forward-model overview, and a growing `docs/baselines/` section with qualitative/quantitative evidence (e.g., `wiener_baseline.md`, `rl_baseline.md`, `adam_denoiser_baseline.md`, `admm_pnp_baseline.md`), plus physics scheduler notes and the new `docs/unrolled_admm.md` guide for the learnable ADMM module.
 
 ---
 
@@ -312,17 +313,49 @@ Note: The experimental diffusion-based ADMM baseline was removed to simplify the
 All scripts default to saving weights in `src/mtf_aware_deblurring/assets/`, and every plug-and-play baseline accepts `--denoiser-type/--denoiser-weights` so you can hot-swap your checkpoints without touching code.
 
 
+## Learnable Unrolled ADMM (end-to-end)
+
+The latest commit adds a differentiable, physics-aware unrolled ADMM module (`src/mtf_aware_deblurring/reconstruction/unrolled_admm.py`) with per-iteration `{rho, denoiser_weight, sigma_multiplier}`, optional learned MTF trust masks, and denoise gating. A small context MLP can modulate parameters using physics features (blur length, taps, photon budget, MTF/SNR scores).
+
+- **Training entrypoint:** `scripts/train_unrolled.py` synthesizes blurred/noisy pairs on-the-fly from DIV2K using the forward model and trains the unrolled network end-to-end with a frozen UNet prior.
+- **Quick smoke (GPU):**
+  ```bash
+  python scripts/train_unrolled.py \
+    --div2k-root data --subset train --degradation bicubic --scale X2 \
+    --image-mode grayscale --limit 4 --target-size 256 \
+    --patterns box random legendre --taps 31 --blur-length 15 \
+    --photon-budget 1000 --read-noise 0.01 \
+    --steps 8 --epochs 1 --batch-size 1 --lr 1e-4 \
+    --denoise-every 1 --mtf-mask --device cuda \
+    --checkpoint-dir checkpoints/unrolled-smoke
+  ```
+- **Loading a checkpoint for inference (example):**
+  ```python
+  import torch
+  from mtf_aware_deblurring.reconstruction import UnrolledADMM, UnrolledADMMConfig
+  from mtf_aware_deblurring.denoisers.unet_denoiser import UNetDenoiserNet
+
+  ckpt = torch.load("checkpoints/unrolled-smoke/unrolled_best.pt", map_location="cpu")
+  model = UnrolledADMM(UNetDenoiserNet(channels=1), UnrolledADMMConfig(), channels=1)
+  model.load_state_dict(ckpt["model_state"])
+  recon, trace = model(obs, kernel, mtf=mtf_map, context=ctx_features, return_trace=True)
+  ```
+  `ctx_features` should mirror the training context ordering (blur_length_px, taps, photon_budget, optics_score, snr_score). Use `scripts/train_unrolled.py` for preprocessing/reference.
+
+> Current scope: the unrolled model trains offline via the script above and is not yet wired into `pipelines/reconstruct.py`. Use it for research/ablation runs and export checkpoints for downstream integration.
+
 ---
 
 ## Repository Layout (Highlights)
 
 - `src/mtf_aware_deblurring/forward_pipeline.py` — compatibility shim exposed via `python -m`.
 - `src/mtf_aware_deblurring/pipelines/` - CLI entry points (`forward.py`, `reconstruct.py`) plus shared batch helpers.
-- `src/mtf_aware_deblurring/reconstruction/` - reusable reconstruction algorithms (Wiener, Richardson-Lucy, ADAM+TinyDenoiser).
+- `src/mtf_aware_deblurring/reconstruction/` - reusable reconstruction algorithms (Wiener, Richardson-Lucy, ADAM+TinyDenoiser) plus the learnable unrolled ADMM module.
 - `src/mtf_aware_deblurring/denoisers/` & `src/mtf_aware_deblurring/assets/` - TinyDenoiser architecture plus the pretrained weights used by the ADAM baseline.
 - `src/mtf_aware_deblurring/forward_model_outputs/` - default artifact directories (`div2k/<id>/`, `reconstruction/<method>/`).
 - `src/mtf_aware_deblurring/{datasets,patterns,optics,noise,metrics,synthetic,utils}.py` — reusable building blocks.
 - `scripts/train_tiny_denoiser.py` - helper to regenerate the residual denoiser if you change the noise model.
+- `scripts/train_unrolled.py` - trains the unrolled ADMM/PnP network end-to-end using the forward model as a data generator.
 - `docs/` — proposal, summaries, and baseline reports (`docs/baselines/wiener_baseline.md`, `docs/baselines/adam_denoiser_baseline.md`, `docs/baselines/admm_pnp_baseline.md`).
 
 ---
@@ -331,10 +364,11 @@ All scripts default to saving weights in `src/mtf_aware_deblurring/assets/`, and
 
 - ✓ Refactored forward model into a reusable module with CLI.
 - ✓ DIV2K integration with auto-download and RGB support.
-- ✓ Baseline coverage: Wiener, Richardson-Lucy, ADAM+TinyDenoiser, ADMM+TinyDenoiser, and the new ADMM+Diffusion prior (score-based) hooks.
+- ✓ Baseline coverage: Wiener, Richardson-Lucy, ADAM/ADMM with multiple denoisers (Tiny, DnCNN, UNet, DRUNet).
+- ✓ Learnable unrolled ADMM module with context-conditioned per-iteration parameters and optional learned MTF trust mask (trained via `scripts/train_unrolled.py`).
 - ⚙ Upcoming work:
-  - Physics-aware PnP scheduling experiments (MTF-weighted denoiser schedules).
-  - Extended ablations: photon budget sweeps, exposure code families, schedule variants.
-  - Additional metrics (SSIM, LPIPS) and experiment logging in `docs/experiments/`.
+  - Integrate unrolled checkpoints into the CLI for plug-and-play inference and benchmarking.
+  - Finish physics-aware PnP scheduling ablations with DRUNet and context-driven sigma adaptation.
+  - Extended sweeps (photon budget, exposure code families), plus added SSIM/LPIPS reporting under `docs/experiments/`.
 
 For historical context, consult the [proposal summary](docs/proposal_summary.md) or the original [project proposal PDF](docs/project_proposal.pdf). Baseline details and figures live in [docs/baselines/wiener_baseline.md](docs/baselines/wiener_baseline.md).

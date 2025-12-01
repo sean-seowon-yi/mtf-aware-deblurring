@@ -75,3 +75,4 @@ The `results` dictionary contains PSFs, OTFs, MTFs, blurred measurements, noise 
     --collect-only
   ```
   Outputs land in `forward_model_outputs/reconstruction/rl/<image_id>/...` with `rl_psnr.csv`.
+- Learnable unrolled ADMM/PnP is now available (`reconstruction/unrolled_admm.py`) and trained via `scripts/train_unrolled.py`; see `docs/unrolled_admm.md` for commands and checkpoints.

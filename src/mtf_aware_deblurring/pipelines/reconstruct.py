@@ -8,16 +8,22 @@ from typing import Dict, List, Optional, Any
 
 import imageio.v2 as imageio
 import numpy as np
+import torch
 
 from .common import run_forward_batches
-from ..metrics import lpips_distance
+from ..metrics import lpips_distance, psnr, ssim
 from ..reconstruction import (
     run_wiener_baseline,
     run_richardson_lucy_baseline,
     run_adam_denoiser_baseline,
     run_admm_denoiser_baseline,
     AdaptivePhysicsScheduler,
+    UnrolledADMM,
+    UnrolledADMMConfig,
 )
+from ..reconstruction.results import ReconstructionResult
+from ..reconstruction.prior_scheduler import PhysicsContext
+from ..denoisers.unet_denoiser import UNetDenoiserNet
 
 
 def _serialize_args(args: argparse.Namespace) -> Dict[str, Any]:
@@ -101,7 +107,7 @@ def parse_args(argv=None):
     g_method = parser.add_argument_group("Reconstruction Method Selection")
     g_method.add_argument(
         "--method",
-        choices=["wiener", "rl", "adam", "admm"],
+        choices=["wiener", "rl", "adam", "admm", "unrolled"],
         default="wiener",
         help="Reconstruction algorithm to run.",
     )
@@ -222,6 +228,20 @@ def parse_args(argv=None):
         help="Scaling factor for sigma passed to denoiser (Default 8.0, try 2.0 for sharpness).",
     )
 
+    # --- 9. UNROLLED ADMM (LEARNED) ---
+    g_unrolled = parser.add_argument_group("Unrolled ADMM (learned)")
+    g_unrolled.add_argument(
+        "--unrolled-checkpoint",
+        type=Path,
+        help="Path to a trained UnrolledADMM checkpoint (.pt/.pth).",
+    )
+    g_unrolled.add_argument(
+        "--unrolled-device",
+        choices=["auto", "cpu", "cuda"],
+        default="auto",
+        help="Device for unrolled inference (auto picks CUDA if available).",
+    )
+
     return parser.parse_args(argv)
 
 
@@ -230,6 +250,96 @@ def save_recon_image(path: Path, method: str, pattern: str, image: np.ndarray) -
     png = (np.clip(image, 0, 1) * 255).astype(np.uint8)
     filename = f"{method}_{pattern}.png"
     imageio.imwrite(path / filename, png)
+
+
+def _context_features(ctx: PhysicsContext) -> np.ndarray:
+    metrics = ctx.quality_metrics()
+    blur_norm = float(np.clip(ctx.blur_length_px / 64.0, 0.0, 1.0))
+    taps_norm = float(np.clip(ctx.taps / 64.0, 0.0, 1.0))
+    photon_norm = float(np.clip(ctx.photon_budget / 2000.0, 0.0, 1.0))
+    optics = float(np.clip(metrics.get("optics", 0.0), 0.0, 1.0))
+    snr_val = float(np.clip(metrics.get("snr", 0.0), 0.0, 1.0))
+    return np.array([blur_norm, taps_norm, photon_norm, optics, snr_val], dtype=np.float32)
+
+
+def _to_chw_tensor(arr: np.ndarray) -> torch.Tensor:
+    arr = np.asarray(arr, dtype=np.float32)
+    if arr.ndim == 2:
+        arr = arr[..., None]
+    return torch.from_numpy(arr.transpose(2, 0, 1))
+
+
+def _load_unrolled_state(args, channels: int):
+    ckpt_path = getattr(args, "unrolled_checkpoint", None)
+    if ckpt_path is None:
+        raise ValueError("Unrolled inference requires --unrolled-checkpoint.")
+    device = getattr(args, "unrolled_device", "auto")
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    ckpt = torch.load(ckpt_path, map_location=device)
+    ckpt_args = ckpt.get("args", {})
+    cfg = UnrolledADMMConfig(
+        steps=int(ckpt_args.get("steps", 8)),
+        denoise_every=int(ckpt_args.get("denoise_every", 1)),
+        learn_mtf_mask=bool(ckpt_args.get("mtf_mask", True)),
+    )
+    denoiser = UNetDenoiserNet(channels=channels)
+    model = UnrolledADMM(
+        denoiser,
+        cfg,
+        channels=channels,
+        context_dim=5,
+        device=device,
+    )
+    model.load_state_dict(ckpt["model_state"])
+    model.to(device)
+    model.eval()
+    return {"model": model, "device": device}
+
+
+def run_unrolled_learned(
+    clean_image: np.ndarray,
+    patterns: Dict[str, Any],
+    pattern_contexts: Dict[str, PhysicsContext],
+    args,
+) -> Dict[str, ReconstructionResult]:
+    channels = 1 if getattr(args, "image_mode", "grayscale") == "grayscale" else 3
+    state = getattr(args, "_unrolled_state", None)
+    if state is None:
+        state = _load_unrolled_state(args, channels)
+        args._unrolled_state = state
+
+    model: UnrolledADMM = state["model"]
+    device = state["device"]
+    results: Dict[str, ReconstructionResult] = {}
+
+    for pattern, data in patterns.items():
+        noisy = data["noisy"]
+        kernel = data["kernel"]
+        mtf = data.get("mtf", None)
+        ctx = pattern_contexts.get(pattern, None)
+        context_vec = _context_features(ctx) if isinstance(ctx, PhysicsContext) else np.zeros(5, dtype=np.float32)
+
+        noisy_t = _to_chw_tensor(noisy).unsqueeze(0).to(device)
+        kernel_t = torch.from_numpy(np.asarray(kernel, dtype=np.float32))
+        if kernel_t.ndim == 2:
+            kernel_t = kernel_t.unsqueeze(0)
+        kernel_t = kernel_t.to(device)
+        mtf_t = None
+        if mtf is not None:
+            mtf_t = _to_chw_tensor(mtf).unsqueeze(0).to(device)
+        context_t = torch.from_numpy(context_vec).unsqueeze(0).to(device)
+
+        with torch.no_grad():
+            recon_t, _ = model(noisy_t, kernel_t, mtf=mtf_t, context=context_t, return_trace=False)
+        recon_np = recon_t[0].detach().cpu().numpy().transpose(1, 2, 0)
+        recon_np = np.clip(recon_np, 0.0, 1.0)
+
+        psnr_val = psnr(clean_image, recon_np)
+        ssim_val = ssim(clean_image, recon_np)
+        results[pattern] = ReconstructionResult(recon_np, psnr_val, ssim_val)
+
+    return results
 
 
 def run_method(method: str, batch, args):
@@ -303,6 +413,14 @@ def run_method(method: str, batch, args):
             mtf_wiener_floor=args.admm_mtf_wiener_floor,
             mtf_wiener_tau_min=args.admm_mtf_wiener_tau_min,
             mtf_wiener_tau_max=args.admm_mtf_wiener_tau_max,
+        )
+
+    if method == "unrolled":
+        return run_unrolled_learned(
+            batch.image,
+            batch.forward_outputs["patterns"],  # type: ignore[index]
+            batch.pattern_contexts,
+            args,
         )
 
     raise ValueError(f"Unsupported method: {method}")
