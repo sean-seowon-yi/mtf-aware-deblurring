@@ -26,3 +26,6 @@ outputs
 *.err
 *.png
 *.csv
+
+# Report workspace
+report/
