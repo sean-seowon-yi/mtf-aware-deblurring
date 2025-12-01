@@ -36,7 +36,7 @@ outputs
 *.blg
 *.fdb_latexmk
 *.fls
-*.log
+# *.log
 *.synctex.gz
 *.toc
 *.lof
