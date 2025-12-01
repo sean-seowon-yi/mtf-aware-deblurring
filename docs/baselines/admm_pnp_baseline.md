@@ -70,3 +70,13 @@ Top settings (PSNR averages, 10 images):
 - rho=1.02, weight=0.15 — box 25.42 dB, random 28.06 dB, legendre 29.35 dB.
 
 Recommendation: use rho≈1.04 and denoiser weight≈0.16 for physics-aware ADMM with DRUNet; nearby values (1.00–1.02, 0.15–0.16) are essentially tied. Keep `--admm-mtf-weighting-mode combined` and `--admm-mtf-sigma-adapt` enabled when using the scheduler.
+
+## Full-run benchmark (RGB DIV2K/X2, DRUNet color, no MTF weighting)
+
+A recent full sweep over the entire DIV2K train set (limit=0) with DRUNet color, no MTF weighting, and a more aggressive ADMM setting:
+- **Command (summary):** `--method admm --admm-iters 60 --admm-rho 0.5 --admm-denoiser-weight 0.5 --admm-denoiser-interval 1 --admm-mtf-weighting-mode none --denoiser-type drunet_color --denoiser-device cuda --patterns box random legendre --photon-budget 1000 --blur-length 15 --read-noise 0.01 --collect-only --enable-ssim --enable-lpips --lpips-device cuda --save-recon`
+- **Results (2,400 images):**
+  - box: PSNR **26.84 dB** | SSIM 0.8082 | LPIPS 0.2989
+  - random: PSNR **28.23 dB** | SSIM 0.8226 | LPIPS 0.2442
+  - legendre: PSNR **28.11 dB** | SSIM 0.8172 | LPIPS 0.2472
+- **Output:** metrics CSV and reconstructions under `/u/yazdinip/mtf-smoke/admm-custom/`.
