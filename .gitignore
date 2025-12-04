@@ -29,6 +29,13 @@ outputs
 
 # Report workspace
 # report/
+report/figures/*
+report/comparisons/*
+!report/figures/**/
+!report/comparisons/**/
+!report/figures/**/*.png
+!report/comparisons/**/*.png
+!report/**/*.csv
 
 # LaTeX
 *.aux
