@@ -2,7 +2,7 @@
 
 A research toolkit for coded-exposure motion deblurring with physics-aware reconstruction. Addresses the "Spectral Gap" where standard methods fail in low-light by blindly amplifying noise in spectral nulls.
 
-**Solution:** Frequency-domain Trust Maps that suppress updates in noise-dominated bands.
+For detailed report, refer to [report](report/Physics-Aware Deblurring Report.pdf)
 
 ---
 
@@ -177,4 +177,5 @@ docs/baselines/         # Detailed results
 **Credits:** DRUNet ([deepinv/drunet](https://huggingface.co/deepinv/drunet)), DnCNN, DIV2K, CSC2529 @ UofT
 
 **Repository:** https://github.com/sean-seowon-yi/mtf-aware-deblurring
+
 
