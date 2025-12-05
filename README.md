@@ -2,20 +2,85 @@
 
 A research toolkit for coded-exposure motion deblurring with physics-aware reconstruction. Addresses the "Spectral Gap" where standard methods fail in low-light by blindly amplifying noise in spectral nulls.
 
-For detailed report, refer to [report](report/Physics-Aware_Deblurring_Report.pdf)
-
-For poster, refer to [poster](report/Physics-Aware_Deblurring_Poster.pdf)
+For detailed report, refer to [report](report/Physics-Aware_Deblurring_Report.pdf) | For poster, refer to [poster](report/Physics-Aware_Deblurring_Poster.pdf)
 
 ---
 
-## Installation
+## Capabilities at a Glance
 
-```bash
+- **Physics-Based Forward Model (`pipelines/forward.py`)**:
+  - Simulates programmable shutter codes (Box, Random, Legendre/MLS) with configurable taps and duty cycles.
+  - Realistic sensor noise modeling (Poisson-Gaussian) under varying photon budgets.
+  - Outputs structured arrays (`.npy`), visualizations (`.png`), and spectral analysis plots.
+
+- **Robust Dataset Integration**:
+  - Built-in `DIV2KDataset` with automatic downloading, subset selection (train/valid), and on-the-fly resizing.
+  - Supports both grayscale and RGB processing pipelines.
+
+- **Advanced Reconstruction Baselines**:
+  - **Classic**: Wiener Deconvolution and Richardson-Lucy with TV/Tikhonov regularization.
+  - **PnP-ADAM**: Plug-and-Play optimization using deep denoisers (DnCNN, DRUNet) injected into an ADAM solver.
+  - **Physics-Aware PnP-ADMM**: Proximal algorithm with adaptive scheduling, MTF-based trust masks, and variable `rho` for handling spectral nulls.
+  - **Unrolled ADMM**: End-to-end learnable physics-informed network (`reconstruction/unrolled_admm.py`).
+
+- **Hardware Agnostic**:
+  - Seamlessly switch between **CUDA** (NVIDIA), **DirectML** (AMD/Windows), and **CPU** execution via the `--device` flags.
+
+---
+
+## Installation & Environment
+
+### Windows (PowerShell)
+```powershell
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install --upgrade pip
+.venv\Scripts\activate
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 pip install -e .
+
+# Optional: For AMD GPU support
+pip install torch-directml
+```
+
+### Linux / macOS (Bash)
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+pip install -e .
+
+# Optional: For AMD GPU support (Linux with ROCm)
+# Ensure you install the appropriate torch-directml or ROCm torch wheels
+```
+
+> **Note**: For NVIDIA GPUs, ensure you have the correct CUDA-enabled PyTorch version installed from [pytorch.org](https://pytorch.org/).
+
+---
+
+## Device & GPU Support
+
+This project uses a unified device resolution system (`src/mtf_aware_deblurring/torch_utils.py`). You can target specific hardware for denoisers and training without changing code.
+
+**Supported Backends:**
+- `cuda`: NVIDIA GPUs (requires standard CUDA PyTorch).
+- `dml`: AMD GPUs on Windows/Linux (requires `torch-directml`).
+- `cpu`: Fallback availability on all systems.
+
+**Usage:**
+Pass the device flag to any pipeline script:
+```bash
+# NVIDIA GPU
+--denoiser-device cuda
+
+# AMD GPU (DirectML)
+--denoiser-device dml
+```
+
+To verify your environment's backend:
+```bash
+# Check if DirectML is visible
+python -c "import torch_directml; print(torch_directml.device())"
 ```
 
 ---
@@ -42,6 +107,48 @@ python -m mtf_aware_deblurring.pipelines.reconstruct \
   --denoiser-type drunet_color \
   --denoiser-device cuda --collect-only
 ```
+
+---
+
+## Programmatic Usage & Artifacts
+
+### Python API
+You can run the forward model directly from code without the CLI:
+
+```python
+from mtf_aware_deblurring import SyntheticData, run_forward_model
+
+# 1. Create or load a scene (float32, [0, 1])
+scene = SyntheticData("Checker Board").create_img(seed=0)
+
+# 2. Run simulation
+# Returns a dictionary with keys: 'scene', 'patterns', 'output_dir', etc.
+results = run_forward_model(
+    scene, 
+    patterns=["box", "random", "legendre"],
+    blur_length_px=15, 
+    photon_budget=1000
+)
+
+# 3. Access data
+legendre_data = results["patterns"]["legendre"]
+noisy_input = legendre_data["noisy"]  # The simulated blurred+noisy image
+psf = legendre_data["psf"]            # The motion PSF
+```
+
+### Output Directory Structure
+By default, artifacts are saved to `src/mtf_aware_deblurring/forward_model_outputs/`.
+
+- **`div2k/<image_id>/`**:
+  - `arrays/*.npy`: Raw NumPy arrays for `scene`, `psf`, `kernel`, `noisy` (observation), and `mtf`.
+  - `figures/*.png`: Visualization plots for debugging.
+  - `scene.png`, `y_<pattern>_noisy.png`: Standard image exports.
+
+- **`reconstruction/<method>/`** (e.g., `wiener`, `admm`):
+  - `<image_id>/<method>_<pattern>.png`: Reconstructed images.
+  - `<method>_psnr.csv`: Aggregated metrics (PSNR, SSIM, LPIPS) for the batch.
+
+Override the root output location with `--output-dir /path/to/custom/output`.
 
 ---
 
