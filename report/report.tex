@@ -23,7 +23,7 @@
 %% Legal Notice:
 %% This code is offered as-is without any warranty either expressed or
 %% implied; without even the implied warranty of MERCHANTABILITY or
-%% FITNESS FOR A PARTICULAR PURPOSE! 
+%% FITNESS FOR A PARTICULAR PURPOSE!
 %% User assumes all risk.
 %% In no event shall the IEEE or any contributor to this code be liable for
 %% any damages or losses, including, but not limited to, incidental,
@@ -39,7 +39,7 @@
 %% in the base LaTeX documentation of all distributions of LaTeX released
 %% 2003/12/01 or later.
 %% Retain all contribution notices and credits.
-%% ** Modified files should be clearly indicated as such, including  **
+%% ** Modified files should be clearly indicated as such, including **
 %% ** renaming them and changing author support contact information. **
 %%*************************************************************************
 
@@ -51,158 +51,165 @@
 %%% with \peerreviewfalse
 \peerreviewfalse
 
-
 \usepackage[nocompress]{cite}
 \usepackage{url}
 \usepackage{amsmath,amssymb,graphicx}
-
-
-
-
 \usepackage[switch]{lineno}
 
 % Insert your paper ID and information below
 \newcommand{\paperID}{XXXX}
 
 % Enter your paper title below
-\title{MTF-Aware Deblurring with Physics-Guided Unrolled ADMM}
+\title{Physics-Aware Deblurring with Coded Exposure}
 
 % Enter your author information before
 % Note this is only necessary for the camera review. Submissions are anonymized.
 \author{Pedram Yazdinia and Seo Won Yi}
 
-
 \begin{document}
 
 \IEEEtitleabstractindextext{%
 \begin{abstract}
-Motion blur destroys information. While coded-exposure cameras theoretically preserve high-frequency content by redistributing spectral energy, practical reconstruction is often limited by a "spectral gap"---the disconnect between the idealized forward model and the reality of photon noise and read noise. We bridge this gap with an MTF-aware deblurring framework that explicitly couples degradation physics with modern plug-and-play (PnP) and learned reconstruction pipelines. We demonstrate that while robust classical baselines (Vanilla ADMM with DRUNet) perform well in standard noise regimes, they collapse under severe degradation because they blindly amplify noise in spectral nulls. In contrast, our Physics-Aware ADMM utilizes a frequency-domain "Trust Map" to gate updates based on the Modulation Transfer Function (MTF), maintaining reconstruction quality ($\approx 24$ dB) where baselines fail ($\approx 14$ dB). Furthermore, we introduce a learnable Unrolled ADMM that automates parameter tuning by predicting context-aware schedules from scene statistics. Our framework runs on CPU, CUDA, or DirectML and provides a reproducible foundation for physics-guided computational photography.
+Motion blur represents a fundamental information bottleneck in photography. While coded-exposure cameras theoretically preserve high frequencies, practical reconstruction is limited by the ``Spectral Gap''---the disconnect between idealized forward models and real-world signal-to-noise ratios. We bridge this gap with an Physics-aware deblurring framework that explicitly couples degradation physics with modern plug-and-play (PnP) reconstruction. We demonstrate that while classical baselines (e.g., ADMM with DRUNet) perform well in standard regimes, they collapse under severe degradation because they blindly amplify noise in spectral nulls. We introduce a frequency-domain ``Trust Map'' to gate updates based on the Modulation Transfer Function (MTF), maintaining reconstruction quality ($\approx 24$ dB) where baselines fail ($\approx 14$ dB). Furthermore, we propose a learnable Unrolled ADMM that predicts context-aware schedules from scene statistics, automating parameter tuning. Our framework runs on CPU, CUDA, or DirectML, providing a reproducible foundation for physics-aware computational photography.
 \end{abstract}
 
 \begin{IEEEkeywords} % Enter keywords here
-Computational Photography, Coded Exposure, Image Restoration, Plug-and-Play Priors, Algorithm Unrolling
+Computational Photography, Coded Exposure, Image Restoration, Plug-and-Play Priors, Algorithm Unrolling, ADMM
 \end{IEEEkeywords}
 }
 
-
 % Make Title
-\markboth{MTF-Aware Deblurring Report}%
+\markboth{Physics-Aware Deblurring Report}%
 {}
 
 \maketitle
 
-
-
 % The first section title should be wrapped inside a \IEEEraisesectionheading as follows.
 \IEEEraisesectionheading{
-  \section{Introduction}\label{sec:introduction}
-}
+  \section{Introduction}\label{sec:introduction}}
+\IEEEPARstart{M}{otion} blur acts as a low-pass filter, often introducing deep spectral nulls where spatial frequencies are irretrievably lost. Coded-exposure photography \cite{raskar2006coded} mitigates this by fluttering the shutter to ``broaden'' the blur kernel and improve invertibility.
 
-\IEEEPARstart{M}{otion} blur is an information-theoretic bottleneck. When a camera moves during exposure, the resulting blur kernel acts as a low-pass filter, often introducing deep spectral nulls where spatial frequencies are irretrievably lost. Coded-exposure photography \cite{raskar2006coded} attempts to solve this by fluttering the shutter, modulating the integration to "broadband" the blur kernel and preserve invertibility.
+In practice, a gap remains. Under real-world low-light conditions, the interaction between the shutter code's Modulation Transfer Function (MTF) and sensor noise gives rise to a ``Spectral Gap'' in which frequencies that are theoretically preserved may have such low Signal-to-Noise Ratio (SNR) that inversion algorithms, even with deep priors, fail to recover them. This produces severe ringing or oversmoothing. Classical methods like Richardson Lucy struggle in these regions, and Plug-and-Play (PnP) approaches often treat the forward model as a black box, applying fixed schedules regardless of optical quality.
 
-However, a gap remains between theory and practice. In real-world low-light conditions, the interaction between the shutter code's Modulation Transfer Function (MTF) and sensor noise creates a "Spectral Gap." Frequencies that are theoretically preserved may have such low Signal-to-Noise Ratio (SNR) that standard inversion algorithms---even those with powerful deep denoising priors---fail to recover them, leading to severe ringing and noise amplification. Classical methods like Richardson--Lucy oversmooth these regions, while modern Plug-and-Play (PnP) approaches often treat the forward model as a black box, applying a fixed denoising schedule regardless of the optical conditioning.
-
-This work argues that reconstruction algorithms must be \textit{physics-aware}. We present a framework that explicitly conditions the optimization trajectory on the spectral quality of the degradation. We make three key contributions:
+We argue that reconstruction algorithms must be \textit{physics-aware}. Our framework explicitly conditions the optimization trajectory on the spectral characteristics of the degradation. We contribute:
 \begin{enumerate}
-    \item \textbf{The "Spectral Gap" Insight:} We demonstrate that standard PnP methods fail in severe noise regimes because they lack a mechanism to "distrust" the data term in low-MTF bands. We introduce a frequency-domain \textbf{Trust Map} that acts as a gatekeeper, suppressing updates in spectral nulls and forcing the solver to rely on the learned prior.
-    \item \textbf{Adaptive Physics Scheduling:} We propose a dynamic scheduler for ADMM that adjusts the penalty parameter ($\rho$) and denoiser weight based on an "Optics Score" derived from the MTF. This allows the algorithm to be aggressive when optics are good and conservative when they are poor, without manual tuning.
-    \item \textbf{Learnable Unrolled ADMM:} To bridge the gap between hand-tuned optimization and black-box deep learning, we implement an unrolled ADMM architecture. A lightweight context MLP analyzes scene statistics (blur length, photon budget, MTF profile) to predict optimal per-iteration schedules and spectral masks, achieving competitive performance with zero manual intervention.
+    \item \textbf{The ``Spectral Gap'' Insight:} We show that PnP methods fail in high-noise settings because they cannot ``distrust'' the data term in low-MTF bands. We introduce a frequency-domain \textbf{Trust Map} that gates updates in these regions, enforcing reliance on the prior.
+    \item \textbf{Adaptive Physics Scheduling:} We design a dynamic ADMM scheduler that adjusts the penalty parameter ($\rho$) and denoiser weight based on an ``Optics Score'' derived from the MTF, enabling aggressive updates for strong optics and conservative ones for weak optics, without manual tuning.
+    \item \textbf{Learnable Unrolled ADMM:} We implement an unrolled ADMM architecture with a lightweight context MLP that analyzes scene statistics (e.g., blur length, photon budget, MTF profile) to predict iteration schedules and spectral masks, achieving strong performance without hand-tuning.
 \end{enumerate}
 
-Empirically, we show that this physics-aware approach yields massive gains in severe regimes---improving PSNR by $\approx 10$ dB over strong baselines---while matching or slightly exceeding them in standard conditions. The entire framework is open-sourced with a modular design to facilitate future research at the intersection of optics and algorithms.
-
+Empirically, our physics-aware approach improves PSNR by $\approx 10$ dB over strong baselines in severe conditions and matches or slightly exceeds them under standard settings. We release the full framework as open source, with a modular design to support future research at the intersection of optics and optimization.
 
 \section{Background and Related Work}
 
 \subsection{Motion Deblurring and Coded Exposure}
-Motion blur is a longstanding problem in computational photography. Early work by Levin et al. \cite{levin2009understanding} demonstrated that blind deconvolution is ill-posed because the gradients of the blurred image and the kernel are often indistinguishable. Cho and Lee \cite{cho2009fast} proposed fast iterative methods using strong edge priors, but these struggle when the kernel destroys significant spectral information.
+Motion blur renders blind deconvolution ill-posed \cite{levin2009understanding}. To mitigate this, Raskar et al. \cite{raskar2006coded} introduced \textit{Coded Exposure}, modulating the shutter to preserve high-frequency information. Agrawal et al. \cite{agrawal2009optimal} further demonstrated that code invertibility is paramount for noise robustness.
 
-The core limitation of standard "box" shutters is the presence of spectral zeros in the Modulation Transfer Function (MTF). Mathematically, a box blur of length $L$ corresponds to a rectangular pulse in the spatial domain. Its Fourier transform is a Sinc function, $\text{sinc}(\omega L)$, which has periodic zero-crossings at integer multiples of $1/L$. At these frequencies, the MTF drops to zero, meaning the optical system transmits \textit{no information} about the scene structure. Raskar et al. \cite{raskar2006coded} introduced the concept of \textit{Coded Exposure}, where the shutter flutters open and closed during integration. This temporal modulation reshapes the motion PSF, preserving high-frequency information and making the deconvolution problem well-conditioned. Agrawal et al. \cite{agrawal2009optimal} further analyzed optimal codes, showing that the invertibility of the code is paramount for noise robustness.
-
-Among various binary codes, Legendre Sequences (MLS) \cite{jeon2013fluttering} are particularly effective. Defined by quadratic residues modulo a prime $p$, they exhibit a nearly flat power spectrum and a peaky autocorrelation, minimizing noise amplification during inversion. Our work adopts MLS as the gold standard for coded exposure, comparing it against random and box codes.
+Among binary codes, Legendre sequences \cite{jeon2013fluttering} are particularly effective. Defined by quadratic residues modulo a prime $p$, they exhibit a nearly flat power spectrum and peaky autocorrelation, minimizing noise amplification during inversion. Our work adopts Legendre codes as the high-quality reference, comparing them against random and box codes.
 
 \subsection{Deep Learning and Plug-and-Play Priors}
-The advent of deep learning revolutionized image restoration. Zhang et al. \cite{zhang2017beyond} introduced DnCNN, a residual learning framework that outperformed traditional dictionary learning methods. However, end-to-end training often leads to overfitting specific degradation models.
-
-More recently, Zhang et al. \cite{zhang2021plug} introduced DRUNet (DPIR), a U-Net based denoiser trained on a wide range of noise levels, which has become a standard benchmark for PnP restoration.
-
-PnP-ADMM has found widespread adoption beyond photography, particularly in **Medical Imaging** (e.g., MRI, CT) and **Satellite Remote Sensing**. In these domains, the forward model often involves partial observations---such as undersampled k-space trajectories or atmospheric turbulence---that create specific spectral or spatial nulls. Our "Physics-Aware" insight is directly relevant here: just as our Trust Map down-weights updates in MTF zeros, robust reconstruction in these fields requires explicitly "distrusting" the data term in undersampled or corrupted regions, rather than treating all measurements equally.
-
-Despite their success, standard PnP methods often treat the data fidelity term as a "black box," using fixed or monotonically decreasing penalty schedules that ignore the spectral characteristics of the forward model. Our work addresses this gap by explicitly conditioning the optimization schedule on the MTF.
-
-We specifically employ the Alternating Direction Method of Multipliers (ADMM) because it naturally decouples the complex, non-convex prior (the deep denoiser) from the convex data fidelity term. This "splitting" allows us to solve the inversion step efficiently in the frequency domain (using the Trust Map) while delegating the regularization to the off-the-shelf deep network. This modularity is key to our "physics-aware" design, as it lets us inject optical knowledge into the inversion without retraining the prior.
+Deep learning has revolutionized restoration, with models like DnCNN \cite{zhang2017beyond} and DRUNet \cite{zhang2021plug} serving as powerful priors. Plug-and-Play (PnP) methods \cite{venkatakrishnan2013plug,chan2016plug} use such denoisers as implicit regularizers within iterative schemes such as ADMM \cite{boyd2011distributed}. PnP-ADMM allows these non-convex priors to be decoupled from the convex data fidelity term and has been successfully applied in domains such as MRI and remote sensing \cite{venkatakrishnan2013plug,chan2016plug}, where partial observations create structured spectral nulls. Standard photographic reconstruction pipelines, however, often ignore the spectral characteristics of the forward model. Our work addresses this by explicitly conditioning the optimization schedule on the MTF.
 
 \subsection{Algorithm Unrolling}
-Algorithm unrolling (or unfolding) \cite{monga2021algorithm} interprets the iterations of an optimization algorithm as layers in a recurrent neural network. This allows for the end-to-end learning of hyperparameters (step sizes, regularization weights) that are typically hand-tuned. Diamond et al. \cite{diamond2017unrolled} demonstrated that unrolled proximal gradient methods could outperform generic CNNs by incorporating the physical forward model. Our Unrolled ADMM builds on this direction, learning not just scalar parameters but also spectral trust masks that adapt to the specific degradation instance.
-
-These related works highlight the need for a unified framework that bridges the gap between physical modeling and deep learning. The following section details our proposed methodology for achieving this integration.
-
-
+Algorithm unrolling \cite{monga2021algorithm} interprets optimization iterations as neural network layers. Diamond et al. \cite{diamond2017unrolled} showed unrolled methods could outperform generic CNNs by incorporating physical models. Our Unrolled ADMM extends this by learning not just scalar parameters, but also spectral trust masks adapted to specific degradation instances.
 
 \section{Methodology}
-Our framework introduces a "Physics-Aware PnP-ADMM" algorithm that explicitly couples the degradation physics with the reconstruction process. As illustrated in our system diagram, the pipeline consists of two main branches: a Physics-Aware Branch that pre-computes degradation statistics, and an Iterative PnP-ADMM Loop that solves the inverse problem using these statistics.
+Our framework introduces a ``Physics-Aware PnP-ADMM" algorithm that explicitly couples the degradation physics with the reconstruction process. The pipeline consists of two main branches: a Physics-Aware Branch that pre-computes degradation statistics, and an Iterative PnP-ADMM Loop that solves the inverse problem using these statistics.
 
 \subsection{Forward Model}
-We model coded exposure as a linear convolution with additive noise, $y = k * x + n$. Our simulator generates exposure codes (box, random, MLS) with configurable taps, blur length, and duty cycle. It converts these codes to Point Spread Functions (PSFs) via a motion kernel and computes key diagnostics such as the Optical Transfer Function (OTF) and Modulation Transfer Function (MTF).
+We model coded exposure as a linear convolution with additive noise, $y = k * x + n$. Our simulator generates exposure codes (Box, Random, Legendre) with configurable taps $T$, blur length (pixels), and duty cycle. It converts these codes to Point Spread Functions (PSFs) via a motion kernel and computes key diagnostics such as the Optical Transfer Function (OTF) and Modulation Transfer Function (MTF).
 
 \begin{figure}[t]
     \centering
-    \includegraphics[width=0.95\linewidth]{figures/synthetic_demo/figures/mtf_slice.png}
+    \includegraphics[width=0.95\linewidth]{figure/mtf.png}
     \caption{Normalized MTF horizontal slice for Box, Random, and Legendre codes. Note the spectral zeros in the Box code (blue) which destroy information at specific frequencies. In contrast, the Random (orange) and Legendre (green) codes maintain broadband spectral coverage, preserving invertibility.}
     \label{fig:mtf_slice}
 \end{figure}
 
-As shown in Figure~\ref{fig:mtf_slice}, the choice of exposure code dramatically affects the conditioning of the inverse problem. The standard "Box" shutter (blue curve) exhibits characteristic spectral zeros where the MTF drops to zero. At these frequencies, signal information is irretrievably lost, making deconvolution ill-posed and sensitive to noise. In contrast, the "Random" (orange) and "Legendre" (green) codes are designed to be broadband, maintaining significant magnitude across the spectrum. This "spectral preservation" is the physical foundation that allows our method to recover high-frequency details that are otherwise lost.
+As shown in Figure~\ref{fig:mtf_slice}, the choice of exposure code dramatically affects the conditioning of the inverse problem. The standard ``Box" shutter (blue curve) exhibits characteristic spectral zeros where the MTF drops to zero. At these frequencies, signal information is irretrievably lost, making deconvolution ill-posed and sensitive to noise. In contrast, the ``Random" (orange) and ``Legendre" (green) codes are designed to be broadband, maintaining significant magnitude across the spectrum. This ``spectral preservation" is the physical foundation that allows our method to recover high-frequency details that are otherwise lost.
 
 To simulate realistic capture conditions, we inject Poisson--Gaussian noise parameterized by a fixed photon budget and read-noise standard deviation $\sigma$. Figure \ref{fig:synthetic_samples} visualizes these noisy observations, highlighting how the coded exposures retain more texture information than the box blur. The pipeline supports both RGB and grayscale inputs from the DIV2K dataset, as well as synthetic scenes for validation.
 
 \begin{figure}[t]
     \centering
-    \includegraphics[width=0.3\linewidth]{figures/synthetic_demo/y_box_noisy.png}
-    \includegraphics[width=0.3\linewidth]{figures/synthetic_demo/y_random_noisy.png}
-    \includegraphics[width=0.3\linewidth]{figures/synthetic_demo/y_legendre_noisy.png}
-    \caption{Synthetic noisy observations for Box (left), Random (center), and Legendre (right) codes. The coded exposures retain more texture information despite the noise.}
+    \includegraphics[width=1\linewidth]{figure/synthetic.png}
+    \includegraphics[width=1\linewidth]{figure/snr.png}
+    \caption{Synthetic noisy and blurred observations for Box, Random, and Legendre codes. Despite the added noise, the coded exposures preserve more texture and high-frequency detail. The spectral SNR differences are present in the diagrams, but they are subtle; we recommend zooming in to observe them more clearly.}
     \label{fig:synthetic_samples}
 \end{figure}
 
 \subsection{Physics-Aware Branch and Trust Weights}
-The core of our method is the recognition that not all data is created equal. In the frequency domain, the reliability of the observed signal $Y(\omega)$ depends entirely on the local SNR, which is modulated by the MTF $|K(\omega)|$.
 
-We compute a frequency-domain \textbf{Trust Map} ($W$) that acts as a spectral gatekeeper. It answers the question: \textit{"Should we trust the observation at this frequency, or rely on the prior?"} We employ a "Combined" strategy that fuses a Wiener-like estimate with a geometric gamma correction:
+The core of our method is the recognition that not all data is equally reliable. In the frequency domain, the utility of the observed signal $Y(\omega)$ is governed by the local SNR, which is strongly modulated by the MTF $|K(\omega)|$.
+
+We construct a frequency-domain \textbf{Trust Map} $W(\omega)$ that acts as a spectral gate. It answers the question: \textit{``Should we trust the observation at this frequency, or should we let the prior dominate?''} In practice, we combine two components:
+\begin{itemize}
+    \item A \textbf{Wiener-like weight} $W_{\text{Wiener}}(\omega)$ derived from $|K(\omega)|^2$ and a scalar parameter $\tau$ inferred from the noisy observation.
+    \item A \textbf{gamma-weighted MTF mask} that reshapes the normalized MTF and enforces both a hard cutoff and a soft floor.
+\end{itemize}
+
+We first compute a normalized MTF:
 \begin{equation}
-W(\omega) = \underbrace{\left(\frac{|K(\omega)|^2}{|K(\omega)|^2 + \alpha \frac{\sigma^2}{S_{xx}}}\right)}_{\text{Wiener Term}} \cdot \underbrace{\left(|K(\omega)|^\gamma\right)}_{\text{Gamma Term}}
+\widetilde{\text{MTF}}(\omega) = \frac{|K(\omega)|}{\max_{\omega'} |K(\omega')|} \in [0, 1].
 \end{equation}
-where $\gamma$ controls the steepness of the fall-off (typically $\gamma=1.5\text{--}2.0$). This composite mask ensures that frequencies with low SNR or near-zero MTF are aggressively down-weighted. The ADMM X-update (inversion) then becomes a Weighted Least Squares (WLS) problem:
+From this, we form a gamma mask
 \begin{equation}
-x^{(k+1)} = \mathcal{F}^{-1}\left( \frac{W \cdot K^* \cdot \mathcal{F}(y) + \rho \mathcal{F}(z^{(k)} - u^{(k)})}{W \cdot |K|^2 + \rho} \right)
+W_{\gamma}(\omega) = \widetilde{\text{MTF}}(\omega)^{\gamma},
 \end{equation}
-By weighting the data term with $W$, we effectively "hide" the noisy spectral nulls from the solver. In these bands, the term $W \cdot |K|^2 \to 0$, causing the update to reduce to $x^{(k+1)} \approx z^{(k)} - u^{(k)}$. This forces the solution to be driven entirely by the denoising prior $z$ in regions where the physics has destroyed the information.
+where $\gamma$ controls the suppression of low-MTF frequencies. We apply two additional operations: a \textbf{hard cutoff} to zero out hopeless frequencies, and a \textbf{soft floor} to retain moderately weak bands preventing them from being completely ignored.
+
+In parallel, we compute a Wiener-like weight $W_{\text{Wiener}}(\omega) = f(|K(\omega)|^2; \tau, \alpha)$, where $\alpha$ controls the trade-off between fidelity and robustness. In the \textbf{combined} mode used for our main results, the final Trust Map is:
+\begin{equation}
+W(\omega) \propto W_{\text{Wiener}}(\omega) \cdot W_{\gamma}(\omega),
+\end{equation}
+followed by a global normalization to $[0, 1]$. The ADMM $x$-update then becomes a weighted frequency-domain least squares problem:
+\begin{equation}
+x^{(k+1)} = \mathcal{F}^{-1}\!\left(
+\frac{W \cdot K^* \cdot \mathcal{F}(y)
++ \rho \, \mathcal{F}\big(z^{(k)} - u^{(k)}\big)}
+{W \cdot |K|^2 + \rho}
+\right).
+\end{equation}
+When $W(\omega) \approx 0$ in spectral nulls, the data term vanishes and the update simplifies to $x^{(k+1)} \approx z^{(k)} - u^{(k)}$. In these regions, the solution is driven entirely by the prior.
 
 \subsection{Adaptive Physics Scheduler}
-Standard PnP-ADMM often relies on a fixed penalty parameter $\rho$, which assumes a constant relationship between the data fidelity and the prior. This is suboptimal for motion deblurring, where the "difficulty" of the problem varies wildly with the shutter code and noise level.
+Standard PnP-ADMM typically uses a fixed penalty parameter $\rho$, which assumes a stable relationship between the data term and the prior. This is suboptimal for motion deblurring, where the difficulty of the inverse problem can change dramatically with the exposure code and noise level.
 
-We introduce an \textbf{Adaptive Physics Scheduler} that dynamically modulates the optimization trajectory based on the optical quality:
-\begin{itemize}
-    \item \textbf{Deep Dive Strategy:} To recover fine textures early, we initialize $\rho$ at a very low value ($\rho_{start} \approx 0.02 \rho_{base}$). However, for "bad" optics, this can cause instability. The scheduler detects this via an "Optics Score," $S_{optics} = \text{clip}(3 \cdot \text{mean}(|K(\omega)|), 0, 1)$, and clamps the floor if the score is below a safety threshold.
-    \item \textbf{Geometric Annealing:} We increase $\rho$ geometrically over iterations $k$ to gradually enforce the prior:
-    \begin{equation}
-    \rho_k = \rho_{start} \cdot \left( \frac{\rho_{end}}{\rho_{start}} \right)^{\frac{k}{K}}
-    \end{equation}
-    This acts as a "coarse-to-fine" constraint, allowing the inversion to explore the solution space initially.
-    \item \textbf{Optics-Guided Denoising:} The weight of the denoiser is also modulated. If the Optics Score is low, the scheduler increases the denoiser weight to rely more on the prior:
-    \begin{equation}
-    w_k = w_{base} \cdot (1 + \beta (1 - S_{optics}))
-    \end{equation}
-    where $\beta \approx 0.2$. This allows the system to "hallucinate" missing details when the physics fails to preserve them.
-\end{itemize}
+We introduce an \textbf{Adaptive Physics Scheduler} that modulates the optimization trajectory based on simple optics and noise scores derived from the MTF and photon budget. Given a precomputed MTF map, we define an optics quality score
+\begin{equation}
+S_{\text{optics}} = \text{clip}\bigl(3 \cdot \text{mean}(\text{MTF}),\, 0,\, 1\bigr),
+\end{equation}
+where the mean is taken over spatial frequencies. Well-conditioned optics produce large MTF values, hence $S_{\text{optics}}$ near 1; box-like or diffuser-like patterns yield smaller values.
+
+We then define a deep-dive start multiplier and a conservative end multiplier for the ADMM penalty. For good optics, we would ideally like to start at a very low penalty (around $0.02 \rho_{\text{base}}$) to aggressively recover fine texture, and then ramp up to approximately $1.2 \rho_{\text{base}}$ to lock in the prior. For poor optics, however, such a low starting value can cause instabilities. In practice we use
+\begin{equation}
+m_{\text{start}} =
+\begin{cases}
+0.02, & S_{\text{optics}} \ge 0.15, \\
+0.15, & S_{\text{optics}} < 0.15,
+\end{cases}
+\qquad
+m_{\text{end}} = 1.2,
+\end{equation}
+and ramp geometrically between them. At iteration $k$ of $K$ total steps, the scheduler uses
+\begin{equation}
+\rho_k = \rho_{\text{base}} \cdot m_{\text{start}}
+\left( \frac{m_{\text{end}}}{m_{\text{start}}} \right)^{\frac{k}{K-1}}.
+\end{equation}
+This realizes the desired coarse-to-fine behavior: initially, the solver explores the solution space with a weak prior; later iterations enforce the prior more strongly.
+
+The denoiser weight is also modulated by the optics score. We start from a base weight $w_{\text{base}}$ and increase it for poor optics:
+\begin{equation}
+w_k = \text{clip}\Bigl(w_{\text{base}} \cdot \bigl(1 + 0.2(1 - S_{\text{optics}})\bigr),\, 0,\, 1\Bigr).
+\end{equation}
+When the optics are good, $w_k$ is close to $w_{\text{base}}$ and the data term has more influence. When the optics are poor, the scheduler increases $w_k$ so that the denoiser has greater control, which helps prevent catastrophic noise amplification. In our implementation the scheduler also exposes diagnostic quantities (such as the current multiplier and optics score) for analysis, but the core behavior is captured by the formulas above.
 
 \subsection{Learnable Unrolled ADMM}
-To reduce the reliance on manual hyperparameters, we introduce a learnable unrolled ADMM variant. This model unrolls $K$ iterations of the solver, making the per-iteration parameters---$\rho_k$, denoiser weight $w_k$, and sigma multiplier $\alpha_k$---trainable.
-\begin{itemize}
-    \item \textbf{Context MLP:} A lightweight Multi-Layer Perceptron analyzes the scene to predict optimal schedules. It consumes a normalized feature vector $f_{ctx} = [\text{blur}, \text{taps}, \text{photon}, S_{optics}, S_{SNR}]$ and outputs parameter deltas $\Delta \theta_k$.
-    \item \textbf{Recurrent Update:} At each step $k$, the parameters are updated as $\theta_k = \theta_{base} + \text{MLP}(f_{ctx}, k)$. The ADMM update then proceeds using a \textbf{frozen} UNet backbone for the denoising step $z_{k+1} = \text{Denoiser}(x_{k+1} + u_k, \sigma \cdot \alpha_k)$.
-\end{itemize}
-This design ensures that the heavy lifting of image restoration is done by the pre-trained prior, while the lightweight unrolled module focuses solely on \textit{steering} the optimization. Training is performed end-to-end on DIV2K with on-the-fly forward simulation. We use an $L_1$ loss function, unrolling for $K=24$ steps with a batch size of 1, optimized via AdamW.
+To reduce the reliance on manual hyperparameters, we introduce a learnable unrolled ADMM variant. This model unrolls $K$ iterations of the PnP-ADMM solver into a neural module and learns physics-aware parameters directly from data, while reusing a fixed denoiser backbone.
+
+At each iteration $k$, the model utilizes three scalar parameters: the ADMM penalty $\rho_k$, a denoiser blending weight $w_k$, and a sigma multiplier $\alpha_k$. These are initialized from global values and refined by a lightweight \textbf{Context Network}. A feature vector containing blur and noise statistics (e.g., blur length, photon budget, MTF quality) is passed through a small MLP, which predicts per-step deltas for the parameters. When enabled, the network also predicts spectral mask parameters (gamma, floor, cutoff).
+
+We train the unrolled model end-to-end on DIV2K, with dataset details provided in a later section. The denoiser backbone is kept frozen; thus, the network learns a \textit{policy} for steering the optimization based on physics, rather than learning a new image reconstruction prior from scratch.
 
 \section{Software Framework and Reproducibility}
 To facilitate rigorous comparison and future research, we developed a modular, extensible software framework that serves as a sandbox for computational photography. The repository is architected to decouple the forward model (physics simulation) from the inverse solvers (reconstruction algorithms), allowing researchers to mix and match components seamlessly.
@@ -219,7 +226,7 @@ The codebase is organized into three primary modules:
 The framework exposes a comprehensive set of parameters to fine-tune the simulation and reconstruction process. Users can control:
 \begin{itemize}
     \item \textbf{Physics Parameters:} Blur length, number of taps ($T$), duty cycle, photon budget, and read noise standard deviation ($\sigma$).
-    \item \textbf{Solver Hyperparameters:} ADMM penalty ($\rho$), denoiser weight, number of iterations, and specific "physics hooks" like MTF weighting modes (Gamma, Wiener, Combined) and Sigma Adaptation.
+    \item \textbf{Solver Hyperparameters:} ADMM penalty ($\rho$), denoiser weight, number of iterations, and specific ``physics hooks" like MTF weighting modes (Gamma, Wiener, Combined) and Sigma Adaptation.
     \item \textbf{Hardware Acceleration:} Seamless switching between CPU, CUDA, and DirectML backends for broad hardware compatibility.
 \end{itemize}
 
@@ -251,7 +258,7 @@ This command automatically handles data loading, forward simulation, reconstruct
 
 \section{Experimental Setup}
 \subsection{Datasets and Metrics}
-We utilize the **DIV2K** (Diverse 2K Resolution) dataset, a standard benchmark for image restoration tasks. The dataset consists of 800 high-resolution training images and 100 validation images.
+We utilize the \textbf{DIV2K} (Diverse 2K Resolution) dataset, a standard benchmark for image restoration tasks. The dataset consists of 800 high-resolution training images and 100 validation images.
 \begin{itemize}
     \item \textbf{Training:} For the learnable Unrolled ADMM, we train on the first 800 images using random $256 \times 256$ crops to ensure robustness to varied textures.
     \item \textbf{Evaluation:} All quantitative results (Table \ref{tab:noise1} and \ref{tab:noise2}) are reported on the 100-image validation set. We use center crops of $256 \times 256$ to ensure consistent and reproducible benchmarking across all methods.
@@ -264,13 +271,26 @@ We report three key metrics:
 \end{itemize}
 
 \subsection{Noise Regimes}
-To test robustness, we simulate two distinct noise regimes:
+To test robustness, we simulate two distinct noise regimes using a Poisson--Gaussian model. The read noise standard deviation $\sigma$ is applied relative to the normalized intensity range $[0, 1]$. Given our fixed photon budget of 1000 photons per pixel, these normalized values correspond to significant physical noise floors:
+
 \begin{itemize}
-    \item \textbf{Noise1 (Standard):} Represents a typical low-light capture. Photon budget $= 1000$, Read Noise $\sigma = 0.01$. In this regime, the signal is weak but recoverable by standard methods.
-    \item \textbf{Noise2 (Severe):} Represents an extreme scenario. Photon budget $= 1000$, Read Noise $\sigma = 0.05$, and Blur Length increased to 30 pixels. This regime tests the limits of the algorithm, where the MTF zeros are compounded by heavy noise.
+    \item \textbf{Noise1 (Standard):} Represents a typical low-light capture with a photon budget of 1000 and normalized read noise $\sigma = 0.01$. This corresponds to an effective read noise of $\approx 10$ photons, typical of modern CMOS sensors. In this regime, the signal is weak but recoverable.
+    \item \textbf{Noise2 (Severe):} Represents an extreme scenario (e.g., high analog gain). We maintain the photon budget at 1000 but increase normalized read noise to $\sigma = 0.05$, corresponding to an effective read noise of $\approx 50$ photons. Combined with an increased Blur Length of 30 pixels, the SNR in the spectral nulls drops precipitously, rigorously testing the algorithm's ability to reject noise.
 \end{itemize}
 
 \subsection{Baselines}
+
+% --- MOVED FIGURE 3 HERE ---
+% Placing Figure 3 here ensures it floats to the top of the next page (usually the start of Results)
+% separating it from Figure 4 which is defined later.
+\begin{figure*}[t!]
+    \centering
+    \includegraphics[width=\linewidth]{figure/comparison_noise1.jpg}
+    \caption{Visual comparison for the Standard Regime (Noise1). From left to right: Ground Truth, Noisy Input, Vanilla ADMM, and Physics-Aware ADMM. Our method (right) produces fewer artifacts, although it results in a slightly oversmoothed image compared to the baseline.}
+    \label{fig:noise1_visuals}
+\end{figure*}
+% ---------------------------
+
 We compare against:
 \begin{itemize}
     \item \textbf{Richardson--Lucy:} A classical iterative baseline.
@@ -278,20 +298,12 @@ We compare against:
     \item \textbf{Vanilla ADMM (DRUNet):} A standard ADMM implementation using the same strong DRUNet prior but with a fixed $\rho$ and standard least-squares inversion (no Trust Map). This isolates the contribution of our physics-aware components.
 \end{itemize}
 
-\begin{figure*}[t!]
-    \centering
-    \includegraphics[width=\linewidth]{figures/comparison_noise1.png}
-    \caption{Visual comparison for the Standard Regime (Noise1). From left to right: Ground Truth, Noisy Input, Vanilla ADMM, and Physics-Aware ADMM. Our method (right) recovers sharper details and reduces artifacts compared to the baseline.}
-    \label{fig:noise1_visuals}
-\end{figure*}
-
 \section{Results}
 
-
 \subsection{Standard Regime (Noise1)}
-In the standard noise regime (Blur 15px, $\sigma=0.01$), the signal is degraded but not destroyed. Here, a strong prior can do the heavy lifting. Figure \ref{fig:noise1_visuals} provides a visual comparison, showing that our method recovers sharper details and reduces artifacts compared to the baseline. As shown in Table~\ref{tab:noise1}, the "Vanilla" ADMM baseline with DRUNet achieves $\approx 26\text{--}28$ dB, effectively matching our Physics-Aware method.
+In the standard noise regime (Blur 15px, $\sigma=0.01$), the signal is degraded but not destroyed. Here, a strong prior can do the heavy lifting. Figure \ref{fig:noise1_visuals} provides a visual comparison, showing that our method reduces artifacts compared to the baseline, but results in a slightly oversmoothed image. As shown in Table~\ref{tab:noise1}, the ``Vanilla" ADMM baseline with DRUNet achieves $\approx 26\text{--}28$ dB, effectively matching our Physics-Aware method.
 
-This result is crucial as it underscores that when the SNR is high enough, the "Spectral Gap" is narrow. The deep prior, trained on vast amounts of natural images, can successfully hallucinate the missing high frequencies even without explicit physics guidance. In this "easy" regime, the physics-aware weighting provides only marginal gains ($\approx 0.3$ dB), primarily by preventing minor artifacts.
+This result is crucial as it underscores that when the SNR is high enough, the ``Spectral Gap" is narrow. The deep prior, trained on vast amounts of natural images, can successfully reconstruct the missing high frequencies even without explicit physics guidance. In this ``easy" regime, the physics-aware weighting provides only marginal gains ($\approx 0.3$ dB), primarily by preventing minor artifacts.
 
 \begin{table}[h]
 \caption{Performance Comparison - Standard Regime (Noise1)}
@@ -310,17 +322,19 @@ Unrolled ADMM & 26.34 & 27.19 & 27.15 \\
 \end{tabular}
 \end{table}
 
+\subsection{Severe Regime (Noise2)}
+The performance divergence is most pronounced in the severe regime (Blur 30px, $\sigma=0.05$). Figure \ref{fig:noise2_visuals} illustrates this: the Vanilla ADMM baseline produces output often worse than the input, while our Physics-Aware ADMM successfully reconstructs the image. As shown in Table~\ref{tab:noise2}, the baseline collapses to $\approx 10\text{--}14$ dB.
+
+% --- FIGURE 4 IS HERE ---
 \begin{figure*}[t!]
     \centering
-    \includegraphics[width=\linewidth]{figures/comparison_noise2.png}
-    \caption{Visual comparison for the Severe Regime (Noise2). The Vanilla ADMM baseline (third column) fails to recover meaningful structure, while the Physics-Aware ADMM (right) successfully reconstructs the image, demonstrating robustness to heavy noise and blur.}
+    \includegraphics[width=\linewidth]{figure/comparison_noise2.jpg}
+    \caption{Visual comparison for the Severe Regime (Noise2). The Vanilla ADMM baseline (third column) amplifies noise while trying to solve the deblur problem, while the Physics-Aware ADMM (right) successfully reconstructs the image, demonstrating robustness to heavy noise and blur.}
     \label{fig:noise2_visuals}
 \end{figure*}
+% ------------------------
 
-\subsection{Severe Regime (Noise2)}
-The story changes dramatically in the severe regime (Blur 30px, $\sigma=0.05$). Here, the "Spectral Gap" widens into a chasm. Figure \ref{fig:noise2_visuals} illustrates this collapse: the Vanilla ADMM baseline produces output that is often worse than the input, while our Physics-Aware ADMM successfully reconstructs the image. As shown in Table~\ref{tab:noise2}, the Vanilla ADMM baseline collapses to $\approx 10\text{--}14$ dB.
-
-This failure mode is instructive. The Vanilla ADMM blindly trusts the data term equally across all frequencies. In the spectral nulls of the blur kernel, the signal is zero, but the noise is non-zero. The solver tries to fit this noise, resulting in severe amplification and ringing. Our Physics-Aware method, protected by the Trust Map, "knows" that these frequencies are garbage and ignores them, relying entirely on the prior. This result empirically validates our central thesis: \textit{robust deblurring requires explicit physics awareness.}
+This failure mode is instructive. The Vanilla ADMM blindly trusts the data term equally across all frequencies. In the spectral nulls of the blur kernel, the signal is negligible, yet the noise remains. The solver attempts to fit this noise, resulting in severe amplification and ringing. Our Physics-Aware method, protected by the Trust Map, effectively identifies these frequencies as noise-dominated and suppresses them, relying entirely on the prior. This empirically validates our central thesis: \textit{robust deblurring requires explicit physics awareness.}
 
 \begin{table}[h]
 \caption{Performance Comparison - Severe Regime (Noise2)}
@@ -338,39 +352,25 @@ Unrolled ADMM & 18.52 & 20.16 & 20.44 \\
 \hline
 \end{tabular}
 \end{table}
-Table \ref{tab:noise2} also highlights the performance of the Unrolled ADMM. Despite lacking the heavy-weight DRUNet prior, it achieves $\approx 20$ dB, outperforming the Vanilla baseline by $\approx 6$ dB without any manual tuning. This confirms that under heavy degradation, explicit physics guidance---whether through hand-crafted schedules or learned parameters---is more critical than the raw capacity of the prior.
+Table \ref{tab:noise2} also highlights the performance of the Unrolled ADMM. Despite lacking the heavy-weight DRUNet prior, it achieves approximately $20$ dB and outperforms the Vanilla baseline by roughly $6$ dB without requiring any manual tuning. This result indicates that under heavy degradation, explicit physics guidance, whether provided through hand-crafted schedules or through learned parameters, is more important than the raw representational power of the prior.
 
 \subsection{Unrolled ADMM: The Automation Trade-off}
-Our Unrolled ADMM offers a compelling middle ground. While it trails the heavy-weight Physics-Aware ADMM (with DRUNet) by $\approx 2\text{--}4$ dB, it outperforms standard baselines and, crucially, requires \textit{zero manual tuning}. The learned context MLP successfully predicts effective schedules from the raw image statistics. The performance gap is largely due to the lighter backbone (TinyDenoiser vs. DRUNet) required for end-to-end training. This highlights a classic trade-off: the Unrolled model buys automation and speed at the cost of peak restoration quality.
+The Unrolled ADMM offers a compelling middle ground. While it trails the heavy-weight Physics-Aware ADMM (with DRUNet) by $\approx 2\text{--}4$ dB, it outperforms standard baselines and, crucially, requires \textit{zero manual tuning}. The learned context MLP successfully predicts effective schedules from the raw image statistics. The performance gap is largely due to the lighter backbone (TinyDenoiser vs. DRUNet) required for end-to-end training. This highlights a classic trade-off: the Unrolled model buys automation and speed at the cost of peak restoration quality.
 
 \subsection{Negative Results (Ablation Study)}
-We explored several alternative strategies that yielded negative results, which we document here for scientific completeness:
+We document alternative strategies that yielded negative results to aid future research:
 
-\textbf{Relay Denoising:} We hypothesized that initializing the optimization with a lightweight denoiser (TinyCNN) and switching to a heavy prior (DRUNet) mid-stream would save computation. However, extensive experiments revealed that this approach yields negligible gains ($\pm 0.1$ dB) compared to using DRUNet from the start, while significantly increasing implementation complexity.
+\textbf{Relay Denoising:} We hypothesized that initializing the optimization with a lightweight denoiser (TinyCNN) and switching to a heavy prior (DRUNet) mid-stream would save computation. Experiments revealed negligible gains ($\pm 0.1$ dB) compared to using DRUNet exclusively, despite increased implementation complexity.
 
-\textbf{Spatial Sigma Maps:} We attempted to feed a spatially varying noise map (derived from $\sqrt{I}$) into DRUNet to handle signal-dependent noise. This caused a performance collapse ($-5$ dB). We attribute this to a distribution shift: DRUNet is trained on uniform AWGN, and injecting structured sigma maps likely pushes the input out of its training distribution. This validates our choice to use a scalar, optics-guided sigma multiplier instead.
+\textbf{Spatial Sigma Maps:} We attempted to feed a spatially varying noise map (derived from $\sqrt{I}$) into DRUNet to handle signal-dependent noise. This caused a performance collapse ($-5$ dB). We attribute this to a distribution shift: DRUNet is trained on uniform AWGN, and injecting structured sigma maps likely pushes the input out of the training distribution. This validates our choice of a scalar, optics-guided sigma multiplier.
 
 \section{Conclusion}
-We presented an MTF-aware deblurring framework that bridges the gap between clean theory and noisy reality. By explicitly modeling the "Spectral Gap" and introducing a frequency-domain Trust Map, we enable robust reconstruction in regimes where standard methods fail. Our results demonstrate that while deep learning is powerful, it is not a panacea; in the presence of severe physical degradation, the algorithm must be guided by the physics of the forward model.
+We presented an Physics-aware deblurring framework that bridges the gap between clean theory and noisy reality. By explicitly modeling the ``Spectral Gap" and introducing a frequency-domain Trust Map, we enable robust reconstruction in regimes where standard methods fail. Our results demonstrate that while deep learning is powerful, it is not a panacea; in the presence of severe physical degradation, the algorithm must be guided by the physics of the forward model.
 
-Looking forward, we see significant potential in integrating \textit{Diffusion Models} (Score-Based Generative Models) as priors within our physics-aware framework. While our current DRUNet backbone is efficient, diffusion models offer superior capabilities for texture hallucination, which could further bridge the spectral gap in extreme low-light conditions. However, their high inference cost remains a challenge, suggesting a future research direction in distilling these powerful priors into lightweight, unrolled architectures like the one presented here. We hope this work---and the accompanying open-source toolkit---encourages the community to move beyond black-box restoration and embrace physics-aware design.
+Looking forward, we see significant potential in integrating \textit{Diffusion Models} (score-based generative models) as priors within our physics-aware framework. Although the current DRUNet backbone is efficient, diffusion models provide stronger capabilities for texture hallucination and could help close the spectral gap in extreme low-light conditions. Their high inference cost remains a practical barrier, which suggests a promising direction for future work: distilling these powerful priors into lightweight and unrolled architectures similar to the one presented here. We hope this work, together with the accompanying open-source toolkit, encourages the community to move beyond black-box restoration and adopt physics-aware design principles.
 
 
-
-% Any acknowledgments to only be included in camera ready
-\ifpeerreview \else
-\section*{Acknowledgments}
-The authors would like to thank...
-\fi
-
-\nocite{*}
 \bibliographystyle{IEEEtran}
 \bibliography{references}
 
-
-
-
-
 \end{document}
-
-
