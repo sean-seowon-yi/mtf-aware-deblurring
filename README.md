@@ -83,6 +83,7 @@ python -m mtf_aware_deblurring.pipelines.reconstruct \
 |--------|-----|--------|----------|
 | Vanilla ADMM | 26.84 | 28.23 | 28.11 |
 | Physics-Aware | **27.10** | **28.50** | **29.55** |
+| Unrolled ADMM | 26.34 | 27.19 | 27.15 |
 
 **Severe regime** (Blur=30px, σ=0.05):
 ```bash
@@ -92,6 +93,7 @@ python -m mtf_aware_deblurring.pipelines.reconstruct \
 
 | Method | Box | Random | Legendre |
 |--------|-----|--------|----------|
+| Vanilla ADMM | 10.43 | 13.48 | 13.57 |
 | Physics-Aware | **20.79** | **23.59** | **24.04** |
 | Unrolled ADMM | 18.52 | 20.16 | 20.44 |
 
@@ -181,6 +183,7 @@ docs/baselines/         # Detailed results
 **Credits:** DRUNet ([deepinv/drunet](https://huggingface.co/deepinv/drunet)), DnCNN, DIV2K, CSC2529 @ UofT
 
 **Repository:** https://github.com/sean-seowon-yi/mtf-aware-deblurring
+
 
 
 
