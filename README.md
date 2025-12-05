@@ -22,7 +22,7 @@ pip install -e .
 
 ## Quick Start
 
-(For full CLI commands, refer to `src/mtf_aware_deblurring/pipelines`
+(For full CLI commands, refer to `src/mtf_aware_deblurring/pipelines`)
 
 **Generate blurred images:**
 ```bash
@@ -181,6 +181,7 @@ docs/baselines/         # Detailed results
 **Credits:** DRUNet ([deepinv/drunet](https://huggingface.co/deepinv/drunet)), DnCNN, DIV2K, CSC2529 @ UofT
 
 **Repository:** https://github.com/sean-seowon-yi/mtf-aware-deblurring
+
 
 
 
