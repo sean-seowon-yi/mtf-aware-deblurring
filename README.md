@@ -3,6 +3,7 @@
 A research toolkit for coded-exposure motion deblurring with physics-aware reconstruction. Addresses the "Spectral Gap" where standard methods fail in low-light by blindly amplifying noise in spectral nulls.
 
 For detailed report, refer to [report](report/Physics-Aware_Deblurring_Report.pdf)
+For poster, refer to [poster](report/Physics-Aware_Deblurring_Poster.pdf)
 
 ---
 
@@ -19,6 +20,8 @@ pip install -e .
 ---
 
 ## Quick Start
+
+(For full CLI commands, refer to `src/mtf_aware_deblurring/pipelines`
 
 **Generate blurred images:**
 ```bash
@@ -177,6 +180,7 @@ docs/baselines/         # Detailed results
 **Credits:** DRUNet ([deepinv/drunet](https://huggingface.co/deepinv/drunet)), DnCNN, DIV2K, CSC2529 @ UofT
 
 **Repository:** https://github.com/sean-seowon-yi/mtf-aware-deblurring
+
 
 
 
