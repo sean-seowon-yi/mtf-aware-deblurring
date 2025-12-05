@@ -16,10 +16,6 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-**GPU Support:**
-- NVIDIA: Install CUDA PyTorch from [pytorch.org](https://pytorch.org)
-- AMD: `pip install torch-directml -f https://aka.ms/torch-directml`
-
 ---
 
 ## Quick Start
@@ -181,3 +177,4 @@ docs/baselines/         # Detailed results
 **Credits:** DRUNet ([deepinv/drunet](https://huggingface.co/deepinv/drunet)), DnCNN, DIV2K, CSC2529 @ UofT
 
 **Repository:** https://github.com/sean-seowon-yi/mtf-aware-deblurring
+
